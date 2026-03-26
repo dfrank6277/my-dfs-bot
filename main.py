@@ -1,31 +1,32 @@
 import requests
 import os
 
-# 1. Use your real Discord URL here
+# 1. Your Discord Webhook
 webhook_url = "https://discordapp.com/api/webhooks/1486844673111752744/rO10B7b4Ec4UYWr6U6wx41z-_0kl4WDS4XqpyBSZ2jirlMZcIHAQrcGyQXSoOHDIvR1y"
-
 pandascore_token = os.getenv("PANDASCORE_TOKEN")
 
-# 2. Updated URL to find ANY recent CS2 matches
+# 2. Simplified URL to get ANY upcoming CS2 match
 url = "https://api.pandascore.co"
 headers = {"Authorization": f"Bearer {pandascore_token}"}
 
-response = requests.get(url, headers=headers)
-
-if response.status_code == 200:
+try:
+    response = requests.get(url, headers=headers)
     data = response.json()
-    
-    if len(data) > 0:
-        match = data[0]
-        match_name = match.get('name', 'Unknown Match')
-        status = match.get('status', 'scheduled')
+
+    # If it's a list, take the first item. If it's a dict, use it as is.
+    match = data[0] if isinstance(data, list) and len(data) > 0 else data
+
+    if match and 'name' in match:
+        name = match.get('name', 'Unknown Match')
+        scheduled_at = match.get('begin_at', 'TBD')
         
-        msg = f"🎮 **CS2 Match Found!**\nMatch: {match_name}\nStatus: **{status.upper()}**"
+        msg = f"🔫 **Upcoming CS2 Match Found!**\nMatch: **{name}**\nStarts: `{scheduled_at}`"
         requests.post(webhook_url, json={"content": msg})
-        print("Success: Message sent to Discord!")
+        print("Success! Sent to Discord.")
     else:
-        print("Connected to API, but no matches were found.")
-        requests.post(webhook_url, json={"content": "Checking CS2 matches... none active right now."})
-else:
-    print(f"Error: {response.status_code}")
-    print(response.text)
+        print(f"No match found. API Response: {data}")
+
+except Exception as e:
+    print(f"Something went wrong: {e}")
+
+webhook_url = "https://discordapp.com/api/webhooks/1486844673111752744/rO10B7b4Ec4UYWr6U6wx41z-_0kl4WDS4XqpyBSZ2jirlMZcIHAQrcGyQXSoOHDIvR1y"

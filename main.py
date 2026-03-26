@@ -25,7 +25,7 @@ if __name__ == "__main__":
 import requests
 
 # This is the "phone number" for your Discord channel
-webhook_url = https://discordapp.com/api/webhooks/1486844673111752744/rO10B7b4Ec4UYWr6U6wx41z-_0kl4WDS4XqpyBSZ2jirlMZcIHAQrcGyQXSoOHDIvR1y
+webhook_url = "https://discordapp.com/api/webhooks/1486844673111752744/rO10B7b4Ec4UYWr6U6wx41z-_0kl4WDS4XqpyBSZ2jirlMZcIHAQrcGyQXSoOHDIvR1y"
 
 data = {
     "content": "Hello! The betting bot is now running!"

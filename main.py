@@ -10,24 +10,21 @@ url = "https://api.pandascore.co"
 headers = {"Authorization": f"Bearer {pandascore_token}"}
 
 try:
-    print("Connecting to PandaScore...")
     response = requests.get(url, headers=headers)
     data = response.json()
 
-    # DEBUG: Send a heartbeat to Discord so we know the bot is awake
-    requests.post(webhook_url, json={"content": "📡 Bot is checking PandaScore for CS2 matches..."})
-
     if isinstance(data, list) and len(data) > 0:
-        match = data[0] # Take the very first match found
-        name = match.get('name', 'Unknown Match')
-        status = match.get('status', 'TBD')
-        
-        msg = f"✅ **Match Found!**\nMatch: **{name}**\nStatus: `{status.upper()}`"
-        requests.post(webhook_url, json={"content": msg})
+        for match in data:
+            name = match.get('name', 'Unknown Match')
+            # Pull scores if they exist
+            results = match.get('results', [])
+            score_text = " - ".join([str(r.get('score', 0)) for r in results])
+            
+            msg = f"🔴 **LIVE CS2 MATCH ALERT**\n⚔️ **{name}**\n📊 **Current Score:** `{score_text}`\n----------------------------"
+            requests.post(webhook_url, json={"content": msg})
     else:
-        # If no matches, tell Discord so we know for sure
-        requests.post(webhook_url, json={"content": "Empty: No CS2 matches found in the API right now."})
+        # Just a log in GitHub, no Discord spam if it's empty
+        print("No live CS2 matches currently in progress.")
 
 except Exception as e:
-    error_msg = f"❌ Error: {str(e)}"
-    requests.post(webhook_url, json={"content": error_msg})
+    print(f"Error: {e}")

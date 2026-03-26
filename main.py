@@ -5,28 +5,29 @@ import os
 webhook_url = "https://discordapp.com/api/webhooks/1486844673111752744/rO10B7b4Ec4UYWr6U6wx41z-_0kl4WDS4XqpyBSZ2jirlMZcIHAQrcGyQXSoOHDIvR1y"
 pandascore_token = os.getenv("PANDASCORE_TOKEN")
 
-# 2. Simplified URL to get ANY upcoming CS2 match
+# 2. Let's try "running" matches (live) or "upcoming"
 url = "https://api.pandascore.co"
 headers = {"Authorization": f"Bearer {pandascore_token}"}
 
 try:
+    print("Connecting to PandaScore...")
     response = requests.get(url, headers=headers)
     data = response.json()
 
-    # If it's a list, take the first item. If it's a dict, use it as is.
-    match = data[0] if isinstance(data, list) and len(data) > 0 else data
+    # DEBUG: Send a heartbeat to Discord so we know the bot is awake
+    requests.post(webhook_url, json={"content": "📡 Bot is checking PandaScore for CS2 matches..."})
 
-    if match and 'name' in match:
+    if isinstance(data, list) and len(data) > 0:
+        match = data[0] # Take the very first match found
         name = match.get('name', 'Unknown Match')
-        scheduled_at = match.get('begin_at', 'TBD')
+        status = match.get('status', 'TBD')
         
-        msg = f"🔫 **Upcoming CS2 Match Found!**\nMatch: **{name}**\nStarts: `{scheduled_at}`"
+        msg = f"✅ **Match Found!**\nMatch: **{name}**\nStatus: `{status.upper()}`"
         requests.post(webhook_url, json={"content": msg})
-        print("Success! Sent to Discord.")
     else:
-        print(f"No match found. API Response: {data}")
+        # If no matches, tell Discord so we know for sure
+        requests.post(webhook_url, json={"content": "Empty: No CS2 matches found in the API right now."})
 
 except Exception as e:
-    print(f"Something went wrong: {e}")
-
-webhook_url = "https://discordapp.com/api/webhooks/1486844673111752744/rO10B7b4Ec4UYWr6U6wx41z-_0kl4WDS4XqpyBSZ2jirlMZcIHAQrcGyQXSoOHDIvR1y"
+    error_msg = f"❌ Error: {str(e)}"
+    requests.post(webhook_url, json={"content": error_msg})

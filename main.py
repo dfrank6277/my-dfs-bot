@@ -1,41 +1,23 @@
 import requests
-import random
+import os
 
-# 1. DATA COLLECTION (NBA Example)
-def get_props():
-    # In a real setup, this pulls from PrizePicks/Underdog scrapers
-    # For now, we simulate a 'Projection' vs a 'Line'
-    projection = 25.5  # AI thinks he gets 25
-    line = 22.5        # PrizePicks says 22
-    edge = projection - line
-    return edge
-
-# 2. THE LEARNING BRAIN
-def run_ai_logic():
-    edge = get_props()
-    confidence = 0.85 # This is what the bot 'adjusts' over time
-    
-    if (edge * confidence) > 2.0:
-        print(f"🔥 TOP PICK FOUND: Over {edge} point edge!")
-    else:
-        print("Scanning for better value...")
-
-if __name__ == "__main__":
-    run_ai_logic()
-import requests
-
-# This is the "phone number" for your Discord channel
+# Get your secrets
 webhook_url = "https://discordapp.com/api/webhooks/1486844673111752744/rO10B7b4Ec4UYWr6U6wx41z-_0kl4WDS4XqpyBSZ2jirlMZcIHAQrcGyQXSoOHDIvR1y"
+pandascore_token = os.getenv("PANDASCORE_TOKEN")
 
-data = {
-    "content": "Hello! The betting bot is now running!"
-}
+# PandaScore CS2 Matches Endpoint
+url = "https://api.pandascore.co"
+headers = {"Authorization": f"Bearer {pandascore_token}"}
 
-# This line actually sends the message
-response = requests.post(webhook_url, json=data)
+response = requests.get(url, headers=headers)
 
-# This checks if it worked
-if response.status_code == 204:
-    print("Message sent successfully!")
+if response.status_code == 200:
+    match_data = response.json()[0]
+    team_a = match_data['opponents'][0]['opponent']['name']
+    team_b = match_data['opponents'][1]['opponent']['name']
+    winner = match_data['winner']['name']
+    
+    msg = f"🎮 **CS2 Result Update**\n{team_a} vs {team_b}\n🏆 Winner: **{winner}**"
+    requests.post(webhook_url, json={"content": msg})
 else:
-    print(f"Failed to send message. Error: {response.status_code}")
+    print(f"Error fetching data: {response.status_code}")

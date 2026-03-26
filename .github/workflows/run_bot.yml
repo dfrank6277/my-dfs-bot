@@ -20,4 +20,6 @@ jobs:
         run: python -m pip install requests
         
       - name: Run the Bot
+        env:
+          PANDASCORE_TOKEN: ${{ secrets.PANDASCORE_TOKEN }}
         run: python main.py

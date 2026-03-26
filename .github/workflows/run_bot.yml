@@ -1,0 +1,18 @@
+name: 24-7 Betting Bot
+on:
+  schedule:
+    - cron: '0 * * * *' # This tells GitHub: "Run this every 60 minutes"
+  workflow_dispatch:   # Lets you click a button to run it manually
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Run the Bot
+        run: python main.py

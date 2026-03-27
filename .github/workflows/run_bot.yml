@@ -1,8 +1,9 @@
-name: Ultimate 24-7 Betting Bot
+name: Odds Bot Run
+
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '*/14 * * * *'
+    - cron: '*/13 * * * *' # Runs every 13 mins (efficient for 100k plan)
+  workflow_dispatch:      # Allows you to click "Run workflow" manually for testing
 
 jobs:
   build:
@@ -10,16 +11,19 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - name: Install Libraries
-        run: python -m pip install requests gspread google-auth
-      - name: Run Engine
+
+      - name: Install dependencies
+        run: pip install requests gspread google-auth
+
+      - name: Run Betting Bot
+        # THIS IS THE CRITICAL PART
         env:
-          PANDASCORE_TOKEN: ${{ secrets.PANDASCORE_TOKEN }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-          GOOGLE_SHEETS_JSON: ${{ secrets.GOOGLE_SHEETS_JSON }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          GOOGLE_SHEETS_JSON: ${{ secrets.GOOGLE_SHEETS_JSON }}
         run: python main.py

@@ -12,6 +12,48 @@ REGIONS = 'us' # Change to 'eu' if scanning European CS2 books
 MARKETS = 'h2h' # Moneyline
 
 def run_val_bot():
+    # Make sure your secret name matches exactly what is in GitHub
+    api_key = os.getenv("ODDS_API_KEY")
+    
+    if not api_key:
+        print("❌ CRITICAL ERROR: ODDS_API_KEY is missing from environment secrets.")
+        return
+
+    sports = ['basketball_nba', 'esports_csgo', 'baseball_mlb', 'icehockey_nhl']
+    
+    for sport in sports:
+        url = f"https://api.the-odds-api.com{sport}/odds/"
+        params = {
+            'apiKey': api_key,
+            'regions': 'us',
+            'markets': 'h2h',
+            'oddsFormat': 'american'
+        }
+        
+        print(f"Checking {sport}...")
+        res = requests.get(url, params=params)
+
+        # 1. CHECK STATUS FIRST (Prevents the JSONDecodeError)
+        if res.status_code != 200:
+            print(f"❌ API REJECTED REQUEST ({res.status_code}): {res.text}")
+            continue
+            
+        # 2. SAFE JSON LOADING
+        try:
+            data = res.json()
+        except Exception:
+            print(f"❌ ERROR: Received non-JSON response for {sport}")
+            continue
+
+        if not data:
+            print(f"No active matches for {sport}.")
+            continue
+
+        # 3. YOUR PROCESSING LOGIC
+        for match in data:
+            # (Your logic for analyzing plays goes here)
+            print(f"Found match: {match.get('home_team')} vs {match.get('away_team')}")
+
     for sport in SPORTS:
         # 1. Pull the data
         url = f"https://api.the-odds-api.com/{sport}/odds/"

@@ -1,84 +1,55 @@
 import requests
 import os
-import json
-import gspread
 from datetime import datetime
-from google.oauth2.service_account import Credentials
 
-# --- 1. CONFIGURATION ---
+# --- CONFIG ---
+API_KEY = os.getenv("ODDS_API_KEY")
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
-PANDASCORE_TOKEN = os.getenv("PANDASCORE_TOKEN")
-ODDS_API_KEY = os.getenv("ODDS_API_KEY")
-# Ensure SHEET_ID is the long ID string from the URL, not the email address
-SHEET_ID = "YOUR_ACTUAL_SHEET_ID_HERE" 
+# Use the exact keys from The Odds API docs
+SPORTS = ['basketball_nba', 'esports_csgo', 'baseball_mlb', 'icehockey_nhl'] 
+REGIONS = 'us' # Change to 'eu' if scanning European CS2 books
+MARKETS = 'h2h' # Moneyline
 
-TOTAL_BANKROLL = 1000 
-UNIT_SIZE = TOTAL_BANKROLL * 0.01
-
-# --- 2. DATA LOGGING ---
-def log_to_sheets(row):
-    try:
-        creds_json = os.getenv("GOOGLE_SHEETS_JSON")
-        if not creds_json: 
-            print("Missing Google Sheets JSON secret.")
-            return
+def run_val_bot():
+    for sport in SPORTS:
+        # 1. Pull the data
+        url = f"https://api.the-odds-api.com{sport}/odds/"
+        params = {
+            'apiKey': API_KEY,
+            'regions': REGIONS,
+            'markets': MARKETS,
+            'oddsFormat': 'american'
+        }
         
-        creds_dict = json.loads(creds_json)
-        scope = ['https://www.googleapis.com', 'https://www.googleapis.com']
-        creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
-        client = gspread.authorize(creds)
-        sheet = client.open_by_key(SHEET_ID).sheet1
-        sheet.append_row(row)
-    except Exception as e: 
-        print(f"Sheet Error: {e}")
+        res = requests.get(url, params=params)
+        data = res.json()
 
-# --- 3. THE DECISION ENGINE ---
-def analyze_play(market_odds):
-    score = 50 
-    if market_odds <= -145: score += 25 
-    if market_odds <= -160: score += 15 
-    
-    if score >= 90: return "🟢 GOBLIN", score, 5
-    if score >= 75: return "🎯 STANDARD", score, 3
-    if score >= 70: return "😈 DEMON", score, 1
-    return None, 0, 0
+        # Debug: This will show in your console if the API is actually sending data
+        if not data:
+            print(f"Empty data for {sport}. No upcoming matches found.")
+            continue
 
-# --- 4. EXECUTION ---
-def run_bot():
-    # Example: Scanning CS2 Live Matches via PandaScore
-    if PANDASCORE_TOKEN:
-        try:
-            url = "https://api.pandascore.co"
-            headers = {"Authorization": f"Bearer {PANDASCORE_TOKEN}"}
-            response = requests.get(url, headers=headers)
-            matches = response.json()
-
-            if isinstance(matches, list) and len(matches) > 0:
-                for match in matches:
-                    name = match.get('name', 'Unknown Match')
-                    results = match.get('results', [])
-                    score_text = " - ".join([str(r.get('score', 0)) for r in results])
-                    
-                    msg = f"🔴 **LIVE CS2 MATCH**\n⚔️ **{name}**\n📊 **Score:** `{score_text}`"
-                    requests.post(WEBHOOK_URL, json={"content": msg})
-            else:
-                print("No live CS2 matches found.")
-        except Exception as e:
-            print(f"PandaScore Error: {e}")
-
-    # Example: System Test / Odds API Simulation
-    # In a real run, you'd loop through Odds API results here
-    play_type, conf, units = analyze_play(-155)
-
-    if play_type:
-        msg = (
-            f"🚀 **ULTIMATE BOT ONLINE** 🚀\n"
-            f"🏆 **Type:** {play_type} | 🎯 **Conf:** {conf}%\n"
-            f"💰 **Unit Bet:** `{units}u` (${units * UNIT_SIZE:.2f})\n"
-            f"----------------------------"
-        )
-        requests.post(WEBHOOK_URL, json={"content": msg})
-        log_to_sheets([str(datetime.now()), "System Test", "Live Scan", play_type, units, f"{conf}%"])
+        for match in data:
+            home_team = match['home_team']
+            away_team = match['away_team']
+            
+            for bookie in match['bookmakers']:
+                for market in bookie['markets']:
+                    for outcome in market['outcomes']:
+                        price = outcome['price']
+                        name = outcome['name']
+                        
+                        # LOGIC: Signal if we find a 'Value' price
+                        # Example: If a team is heavily favored (-150 or better)
+                        if price <= -145:
+                            msg = {
+                                "content": f"🎯 **VALUE ALERT** | {sport.upper()}\n"
+                                           f"⚔️ **Match:** {away_team} @ {home_team}\n"
+                                           f"👤 **Bet:** {name} ({price})\n"
+                                           f"🏦 **Bookie:** {bookie['title']}\n"
+                                           f"----------------------------"
+                            }
+                            requests.post(WEBHOOK_URL, json=msg)
 
 if __name__ == "__main__":
-    run_bot()
+    run_val_bot()

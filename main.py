@@ -14,7 +14,7 @@ MARKETS = 'h2h' # Moneyline
 def run_val_bot():
     for sport in SPORTS:
         # 1. Pull the data
-        url = f"https://api.the-odds-api.com{sport}/odds/"
+        url = f"https://api.the-odds-api.com/{sport}/odds/"
         params = {
             'apiKey': API_KEY,
             'regions': REGIONS,

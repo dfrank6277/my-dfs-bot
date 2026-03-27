@@ -6,7 +6,8 @@ from datetime import datetime
 API_KEY = os.getenv("ODDS_API_KEY")
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 # Use the exact keys from The Odds API docs
-SPORTS = ['basketball_nba', 'esports_csgo', 'baseball_mlb', 'icehockey_nhl'] 
+SPORTS = ['basketball_nba', 'esports_csgo', 'baseball_mlb', 'icehockey_nhl']
+ 
 REGIONS = 'us' # Change to 'eu' if scanning European CS2 books
 MARKETS = 'h2h' # Moneyline
 

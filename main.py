@@ -10,7 +10,33 @@ SPORTS = ['basketball_nba', 'esports_csgo', 'baseball_mlb', 'icehockey_nhl']
  
 REGIONS = 'us' # Change to 'eu' if scanning European CS2 books
 MARKETS = 'h2h' # Moneyline
+def run_val_bot():
+    api_key = os.getenv("ODDS_API_KEY")
+    sports = ['basketball_nba', 'esports_csgo', 'baseball_mlb', 'icehockey_nhl']
+    
+    for sport in sports:
+        url = f"https://api.the-odds-api.com{sport}/odds/"
+        params = {'apiKey': api_key, 'regions': 'us', 'markets': 'h2h', 'oddsFormat': 'american'}
+        
+        print(f"Checking {sport}...")
+        res = requests.get(url, params=params)
 
+        if res.status_code != 200:
+            print(f"❌ API REJECTED {sport} ({res.status_code}): {res.text}")
+            continue
+            
+        try:
+            data = res.json()
+            if not data:
+                print(f"No active matches for {sport}.")
+                continue
+                
+            for match in data:
+                # This is where your Discord logic goes
+                print(f"✅ Found: {match['home_team']} vs {match['away_team']}")
+        except Exception as e:
+            print(f"❌ JSON Error: {e}")
+            continue
 
         # 1. CHECK STATUS FIRST (Prevents the JSONDecodeError)
         if res.status_code != 200:

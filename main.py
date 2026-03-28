@@ -1,7 +1,6 @@
 import requests
 import os
 import json
-import time
 
 # --- CONFIGURATION ---
 API_KEY = os.getenv("ODDS_API_KEY")
@@ -15,19 +14,16 @@ def send_discord_alert(message):
         pass
 
 def run_val_bot():
-    # Memory for tracking line movement
-    try:
-        with open('price_memory.json', 'r') as f:
-            memory = json.load(f)
-    except:
-        memory = {}
-
-    esports = ['esports_csgo', 'esports_lol']
-    for game_type in esports:
-        print(f"Scanning Live Lines for {game_type}...")
+    # List of sports to scan
+    sports = ['esports_csgo', 'esports_lol']
+    
+    for game_type in sports:
+        print(f"Scanning {game_type}...")
         
-        # --- BULLETPROOF URL: Manual slashes added ---
-        url = "https://api.the-odds-api.com" + game_type + "/odds/"
+        # --- THE BULLETPROOF URL FIX ---
+        # Note the explicit /v4/sports/ and the trailing /odds/
+        base_url = "https://api.the-odds-api.com"
+        full_url = base_url + game_type + "/odds/"
         
         params = {
             'apiKey': API_KEY,
@@ -37,38 +33,25 @@ def run_val_bot():
         }
         
         try:
-            # We add a 15 second timeout to prevent the bot from hanging
-            res = requests.get(url, params=params, timeout=15)
+            # We use the full_url we just built manually
+            response = requests.get(full_url, params=params, timeout=15)
             
-            if res.status_code == 200:
-                data = res.json()
+            if response.status_code == 200:
+                data = response.json()
                 print(f"✅ SUCCESS: Found {len(data)} games for {game_type}")
                 
-                for match in data:
-                    m_id = match['id']
-                    # Look for price movement
-                    for book in match.get('bookmakers', []):
-                        for market in book.get('markets', []):
-                            for outcome in market.get('outcomes', []):
-                                price = outcome['price']
-                                team = outcome['name']
-                                
-                                if m_id in memory and memory[m_id]['team'] == team:
-                                    diff = memory[m_id]['price'] - price
-                                    if diff >= 25:
-                                        msg = f"📈 **SMART MONEY ALERT**\nMatch: {match['away_team']} vs {match['home_team']}\nMovement: {memory[m_id]['price']} ➡️ {price}"
-                                        send_discord_alert(msg)
-
-                                memory[m_id] = {'price': price, 'team': team}
+                for game in data:
+                    home = game.get('home_team')
+                    away = game.get('away_team')
+                    msg = f"🏆 **MATCH DETECTED**\n{away} vs {home} ({game_type.upper()})"
+                    send_discord_alert(msg)
             else:
-                print(f"❌ API Error {res.status_code}: {res.text}")
+                print(f"❌ API Error {response.status_code}: {response.text}")
                 
         except Exception as e:
-            print(f"❌ Connection Error: {e}")
-
-    # Save Memory
-    with open('price_memory.json', 'w') as f:
-        json.dump(memory, f)
+            # This will now show the EXACT URL it tried to visit
+            print(f"❌ Connection Error for {game_type}. Tried to visit: {full_url}")
+            print(f"Error Details: {e}")
 
 if __name__ == "__main__":
     print("--- BOT STARTING ---")

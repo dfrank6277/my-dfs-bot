@@ -2,7 +2,7 @@ import requests
 import os
 import json
 
-# --- CONFIGURATION (GitHub Secrets) ---
+# --- CONFIGURATION ---
 API_KEY = os.getenv("ODDS_API_KEY")
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
@@ -14,7 +14,6 @@ def send_discord_alert(message):
         pass
 
 def run_val_bot():
-    # We use hard-coded absolute URLs to prevent mashing and 404s
     targets = {
         'CSGO': 'https://api.the-odds-api.com',
         'LOL': 'https://api.the-odds-api.com',
@@ -32,24 +31,26 @@ def run_val_bot():
         }
         
         try:
-            # We use the absolute URL directly
             response = requests.get(full_url, params=params, timeout=15)
             
             if response.status_code == 200:
                 data = response.json()
-                print(f"✅ SUCCESS: Found {len(data)} games for {sport_name}")
-                
-                for game in data:
-                    home = game.get('home_team')
-                    away = game.get('away_team')
-                    msg = f"🏆 **MATCH FOUND**\n{away} vs {home} ({sport_name})"
-                    send_discord_alert(msg)
+                # Ensure data is a list before looping
+                if isinstance(data, list):
+                    print(f"✅ SUCCESS: Found {len(data)} games for {sport_name}")
+                    for game in data:
+                        # Extract names safely
+                        home = game.get('home_team', 'Unknown Home')
+                        away = game.get('away_team', 'Unknown Away')
+                        msg = f"🏆 **MATCH FOUND**\n{away} vs {home} ({sport_name})"
+                        send_discord_alert(msg)
+                else:
+                    print(f"⚠️ Unexpected data format for {sport_name}")
             else:
-                print(f"❌ API Error {response.status_code} for {sport_name}: {response.text}")
+                print(f"❌ API Error {response.status_code}")
                 
         except Exception as e:
-            print(f"❌ Connection Error for {sport_name}. Tried: {full_url}")
-            print(f"Error Details: {e}")
+            print(f"❌ Processing Error for {sport_name}: {e}")
 
 if __name__ == "__main__":
     print("--- 24/7 BOT STARTING ---")

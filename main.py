@@ -1,22 +1,3 @@
-import requests
-import os
-import json
-
-# --- CONFIGURATION ---
-ODDS_API_KEY = os.getenv("ODDS_API_KEY")
-GRID_API_KEY = os.getenv("GRID_API_KEY")
-DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
-
-# --- PLAYER MAPPING ---
-PLAYER_MAP = {"Oleksandr Kostyliev": "s1mple", "Mathieu Herbaut": "ZywOo"}
-
-def send_alert(message):
-    if not DISCORD_WEBHOOK: return
-    try:
-        requests.post(DISCORD_WEBHOOK, json={"content": message}, timeout=10)
-    except:
-        pass
-
 def run_dfs_engine():
     # Corrected Slugs
     esports_titles = {'cs2': 'csgo_esl', 'lol': 'leagueoflegends_lck'}
@@ -25,8 +6,8 @@ def run_dfs_engine():
         print(f"Analyzing {title.upper()}...")
         
         # --- THE BULLETPROOF URL FIX ---
-        # Added /v4/sports/ and the trailing /odds/ explicitly
-        url = f"https://api.the-odds-api.com{odds_slug}/odds/"
+        # No variables here—just the straight, correct path
+        url = "https://api.the-odds-api.com" + odds_slug + "/odds/"
         
         params = {
             'apiKey': ODDS_API_KEY,
@@ -50,7 +31,3 @@ def run_dfs_engine():
                 
         except Exception as e:
             print(f"❌ Connection Error for {odds_slug}: {e}")
-
-if __name__ == "__main__":
-    print("--- 24/7 DFS ENGINE ONLINE ---")
-    run_dfs_engine()

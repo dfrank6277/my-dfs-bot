@@ -25,14 +25,7 @@ jobs:
       - name: Run Bot
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }} # <--- THIS LINE IS CRITICAL
-          GRID_API_KEY: ${{ secrets.GRID_API_KEY }}   
-              - name: Run Bot
-        env:
-          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          GRID_API_KEY: ${{ secrets.GRID_API_KEY }} # <--- ADD THIS
-        run: python main.py
-
+          GRID_API_KEY: ${{ secrets.GRID_API_KEY }}
         run: python main.py
 

@@ -6,11 +6,10 @@ import time
 # --- CONFIGURATION ---
 API_KEY = os.getenv("ODDS_API_KEY")
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
-GRID_API_KEY = os.getenv("GRID_API_KEY")
 CACHE_FILE = "sent_matches.json"
+SENSITIVITY = 30 # How many 'points' a line must move to trigger (e.g. -110 to -140)
 
 def get_sent_cache():
-    """Loads the list of matches we already alerted."""
     try:
         with open(CACHE_FILE, 'r') as f:
             return json.load(f)
@@ -18,21 +17,12 @@ def get_sent_cache():
         return {}
 
 def save_sent_cache(cache):
-    """Saves the updated list of matches."""
     with open(CACHE_FILE, 'w') as f:
         json.dump(cache, f)
 
-def send_discord_alert(message, match_id, cache):
-    """Only sends to Discord if we haven't sent this match_id recently."""
-    if match_id in cache:
-        print(f"Skipping duplicate match: {match_id}")
-        return False
-    
-    if not DISCORD_WEBHOOK: return False
-    
+def send_discord_alert(message):
+    if not DISCORD_WEBHOOK: return
     requests.post(DISCORD_WEBHOOK, json={"content": message}, timeout=10)
-    cache[match_id] = time.time() # Mark as sent
-    return True
 
 def run_val_bot():
     cache = get_sent_cache()
@@ -47,21 +37,27 @@ def run_val_bot():
             if res.status_code == 200:
                 data = res.json()
                 for game in data:
-                    match_id = game['id'] # Unique ID from the API
+                    match_id = game['id']
+                    # Get the current odds for the Favorite
+                    current_odds = game['bookmakers'][0]['markets'][0]['outcomes'][0]['price']
                     
-                    # ALERT LOGIC
-                    msg = f"🔥 **{sport.upper()} PLAY**\n{game['away_team']} @ {game['home_team']}"
+                    # SMART MONEY LOGIC
+                    if match_id in cache:
+                        prev_odds = cache[match_id]['price']
+                        
+                        # Calculate movement (If odds drop from -110 to -150, that's 40 points)
+                        movement = prev_odds - current_odds
+                        
+                        if movement >= SENSITIVITY:
+                            msg = f"🚨 **SMART MONEY ALERT** 🚨\n{game['away_team']} @ {game['home_team']}\nLine Moved: {prev_odds} ➡️ {current_odds}\n*Heavy action detected!*"
+                            send_discord_alert(msg)
                     
-                    # Try to send (Filter handles duplicates)
-                    sent = send_discord_alert(msg, match_id, cache)
-                    if sent:
-                        print(f"New match alerted: {match_id}")
+                    # Update cache with latest price
+                    cache[match_id] = {'price': current_odds, 'time': time.time()}
+                    
         except Exception as e:
             print(f"Error: {e}")
     
-    # Cleanup old matches (older than 24 hours) to keep cache small
-    current_time = time.time()
-    cache = {k: v for k, v in cache.items() if current_time - v < 86400}
     save_sent_cache(cache)
 
 if __name__ == "__main__":

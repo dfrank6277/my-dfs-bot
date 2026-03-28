@@ -1,9 +1,8 @@
 import requests
 import os
 import json
-from urllib.parse import urljoin
 
-# --- CONFIGURATION ---
+# --- CONFIGURATION (GitHub Secrets) ---
 API_KEY = os.getenv("ODDS_API_KEY")
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
@@ -15,19 +14,15 @@ def send_discord_alert(message):
         pass
 
 def run_val_bot():
-    # Official slugs for The-Odds-API
-    sports = ['csgo_esl', 'leagueoflegends_lck', 'dota2_epic']
+    # We use hard-coded absolute URLs to prevent mashing and 404s
+    targets = {
+        'CSGO': 'https://api.the-odds-api.com',
+        'LOL': 'https://api.the-odds-api.com',
+        'DOTA2': 'https://api.the-odds-api.com'
+    }
     
-    # THE BULLETPROOF BASE
-    base_url = "https://api.the-odds-api.com"
-    
-    for game_type in sports:
-        print(f"Scanning {game_type}...")
-        
-        # This library function FORCES the slashes to be correct
-        # Result: https://api.the-odds-api.comcsgo_esl/odds/
-        temp_url = urljoin(base_url, f"{game_type}/")
-        full_url = urljoin(temp_url, "odds/")
+    for sport_name, full_url in targets.items():
+        print(f"Scanning {sport_name}...")
         
         params = {
             'apiKey': API_KEY,
@@ -37,24 +32,25 @@ def run_val_bot():
         }
         
         try:
-            print(f"DEBUG: Visiting {full_url}")
+            # We use the absolute URL directly
             response = requests.get(full_url, params=params, timeout=15)
             
             if response.status_code == 200:
                 data = response.json()
-                print(f"✅ SUCCESS: Found {len(data)} games for {game_type}")
+                print(f"✅ SUCCESS: Found {len(data)} games for {sport_name}")
                 
                 for game in data:
                     home = game.get('home_team')
                     away = game.get('away_team')
-                    msg = f"🏆 **MATCH FOUND**\n{away} vs {home} ({game_type.upper()})"
+                    msg = f"🏆 **MATCH FOUND**\n{away} vs {home} ({sport_name})"
                     send_discord_alert(msg)
             else:
-                print(f"❌ API Error {response.status_code}: {response.text}")
+                print(f"❌ API Error {response.status_code} for {sport_name}: {response.text}")
                 
         except Exception as e:
-            print(f"❌ Connection Error for {game_type}: {e}")
+            print(f"❌ Connection Error for {sport_name}. Tried: {full_url}")
+            print(f"Error Details: {e}")
 
 if __name__ == "__main__":
-    print("--- BOT STARTING ---")
+    print("--- 24/7 BOT STARTING ---")
     run_val_bot()

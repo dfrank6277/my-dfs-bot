@@ -32,23 +32,26 @@ def run_val_bot():
         
         try:
             response = requests.get(full_url, params=params, timeout=15)
+            data = response.json()
             
-            if response.status_code == 200:
-                data = response.json()
-                # Ensure data is a list before looping
-                if isinstance(data, list):
-                    print(f"✅ SUCCESS: Found {len(data)} games for {sport_name}")
-                    for game in data:
-                        # Extract names safely
-                        home = game.get('home_team', 'Unknown Home')
-                        away = game.get('away_team', 'Unknown Away')
-                        msg = f"🏆 **MATCH FOUND**\n{away} vs {home} ({sport_name})"
-                        send_discord_alert(msg)
-                else:
-                    print(f"⚠️ Unexpected data format for {sport_name}")
-            else:
-                print(f"❌ API Error {response.status_code}")
-                
+            # CASE 1: Successful List of Games
+            if isinstance(data, list):
+                print(f"✅ SUCCESS: Found {len(data)} games for {sport_name}")
+                for game in data:
+                    home = game.get('home_team', 'Unknown')
+                    away = game.get('away_team', 'Unknown')
+                    msg = f"🏆 **MATCH FOUND**\n{away} vs {home} ({sport_name})"
+                    send_discord_alert(msg)
+            
+            # CASE 2: Error Message (Returned as a Dictionary)
+            elif isinstance(data, dict):
+                error_msg = data.get('message', 'Unknown Error')
+                error_code = data.get('error_code', 'No Code')
+                print(f"❌ API ERROR for {sport_name}: {error_code} - {error_msg}")
+                # This will tell you if your API Key is actually the problem
+                if "apiKey" in error_msg or "key" in error_msg:
+                    print("⚠️ CHECK: Your ODDS_API_KEY in GitHub Secrets may be incorrect.")
+
         except Exception as e:
             print(f"❌ Processing Error for {sport_name}: {e}")
 

@@ -5,6 +5,7 @@ import json
 # --- CONFIGURATION ---
 API_KEY = os.getenv("ODDS_API_KEY")
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
+GRID_API_KEY = os.getenv("GRID_API_KEY")
 
 def send_discord_alert(message):
     print(f"DEBUG: Attempting to send to Discord: {message[:30]}...")

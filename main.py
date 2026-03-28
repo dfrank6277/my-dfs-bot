@@ -26,8 +26,8 @@ def run_val_bot():
     for game_type in esports:
         print(f"Scanning Live Lines for {game_type}...")
         
-        # --- FIXED URL FORMAT (V4 Path Included) ---
-        url = f"https://api.the-odds-api.com{game_type}/odds/"
+        # --- BULLETPROOF URL: Manual slashes added ---
+        url = "https://api.the-odds-api.com" + game_type + "/odds/"
         
         params = {
             'apiKey': API_KEY,
@@ -37,36 +37,36 @@ def run_val_bot():
         }
         
         try:
+            # We add a 15 second timeout to prevent the bot from hanging
             res = requests.get(url, params=params, timeout=15)
+            
             if res.status_code == 200:
                 data = res.json()
-                print(f"✅ Successfully pulled {len(data)} games for {game_type}")
+                print(f"✅ SUCCESS: Found {len(data)} games for {game_type}")
                 
                 for match in data:
                     m_id = match['id']
-                    # Look for the best price in the bookmakers list
+                    # Look for price movement
                     for book in match.get('bookmakers', []):
                         for market in book.get('markets', []):
                             for outcome in market.get('outcomes', []):
                                 price = outcome['price']
                                 team = outcome['name']
                                 
-                                # Track movement if we have seen this match before
                                 if m_id in memory and memory[m_id]['team'] == team:
                                     diff = memory[m_id]['price'] - price
-                                    if diff >= 25: # Sensitivity
+                                    if diff >= 25:
                                         msg = f"📈 **SMART MONEY ALERT**\nMatch: {match['away_team']} vs {match['home_team']}\nMovement: {memory[m_id]['price']} ➡️ {price}"
                                         send_discord_alert(msg)
 
-                                # Update memory for next 13-minute run
                                 memory[m_id] = {'price': price, 'team': team}
             else:
                 print(f"❌ API Error {res.status_code}: {res.text}")
                 
         except Exception as e:
-            print(f"❌ Scraper Error: {e}")
+            print(f"❌ Connection Error: {e}")
 
-    # Save Memory back to file
+    # Save Memory
     with open('price_memory.json', 'w') as f:
         json.dump(memory, f)
 

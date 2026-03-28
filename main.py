@@ -7,6 +7,7 @@ import time
 API_KEY = os.getenv("ODDS_API_KEY")
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 GRID_API_KEY = os.getenv("GRID_API_KEY")
+SENSITIVITY = 25  # Alerts if a line moves 25+ points (e.g. -110 to -135)
 
 def send_discord_alert(message):
     if not DISCORD_WEBHOOK: return
@@ -15,55 +16,52 @@ def send_discord_alert(message):
     except:
         pass
 
-def get_grid_projection(team_name, game_type):
-    url = f"https://api.thegrid.io{game_type}" 
-    headers = {"Authorization": f"Bearer {GRID_API_KEY}"}
-    try:
-        res = requests.get(url, headers=headers, timeout=10).json()
-        for p in res.get('players', []):
-            if p.get('team') and p['team'] in team_name:
-                return p.get('kills_projection')
-    except:
-        return None
-    return None
-
 def run_val_bot():
+    # Load 'Last Price' memory
+    try:
+        with open('price_memory.json', 'r') as f:
+            memory = json.load(f)
+    except:
+        memory = {}
+
     esports = ['esports_csgo', 'esports_lol']
     for game_type in esports:
-        print(f"Scanning {game_type}...")
-        score_url = f"https://api.the-odds-api.com{game_type}/scores/"
-        odds_url = f"https://api.the-odds-api.com{game_type}/odds/"
+        print(f"Scanning Live Lines for {game_type}...")
+        url = f"https://api.the-odds-api.com{game_type}/odds/"
         
         try:
-            score_res = requests.get(score_url, params={'apiKey': API_KEY, 'daysFrom': 1}, timeout=10)
-            if score_res.status_code != 200: continue
-            scores_map = {s['id']: s for s in score_res.json()}
+            res = requests.get(url, params={'apiKey': API_KEY, 'regions': 'us', 'markets': 'h2h'}, timeout=15)
+            if res.status_code != 200: continue
             
-            odds_res = requests.get(odds_url, params={'apiKey': API_KEY, 'regions': 'us', 'markets': 'h2h'}, timeout=10)
-            if odds_res.status_code != 200: continue
-            
-            for match in odds_res.json():
+            for match in res.json():
                 m_id = match['id']
-                if m_id in scores_map and not scores_map[m_id].get('completed', False):
-                    live_info = scores_map[m_id]
-                    for score_item in live_info.get('scores', []):
-                        if str(score_item['score']) == "0":
-                            trailing_team = score_item['name']
-                            for book in match.get('bookmakers', []):
-                                for market in book.get('markets', []):
-                                    for outcome in market.get('outcomes', []):
-                                        if outcome['name'] == trailing_team and outcome['price'] < 150:
-                                            proj = get_grid_projection(trailing_team, game_type)
-                                            proj_text = f"🎯 **Grid Proj:** {proj} Kills" if proj else "🎯 **Grid Proj:** High Volume Expected"
-                                            msg = (f"🔄 **LIVE COMEBACK ALERT**\n"
-                                                   f"Match: {match['away_team']} vs {match['home_team']}\n"
-                                                   f"Value: {trailing_team} is down 0-1 (Odds: {outcome['price']})\n"
-                                                   f"{proj_text}\n"
-                                                   f"🔥 **Play:** Over on {trailing_team} Stars")
-                                            send_discord_alert(msg)
-                                            print(f"ALERT_SENT|{m_id}|{trailing_team}")
+                # Track the Favorite's Price
+                for book in match.get('bookmakers', []):
+                    for market in book.get('markets', []):
+                        for outcome in market.get('outcomes', []):
+                            price = outcome['price']
+                            team = outcome['name']
+                            
+                            # LOGIC: Compare to 13 minutes ago
+                            if m_id in memory and memory[m_id]['team'] == team:
+                                diff = memory[m_id]['price'] - price
+                                if diff >= SENSITIVITY:
+                                    msg = (f"📈 **SMART MONEY DETECTED**\n"
+                                           f"Match: {match['away_team']} vs {match['home_team']}\n"
+                                           f"Team: {team}\n"
+                                           f"Movement: {memory[m_id]['price']} ➡️ {price}\n"
+                                           f"🔥 **Action:** Line is crashing! Bet now.")
+                                    send_discord_alert(msg)
+
+                            # Update Memory
+                            memory[m_id] = {'price': price, 'team': team, 'time': time.time()}
+                            
         except Exception as e:
-            print(f"Error scanning {game_type}: {e}")
+            print(f"Scraper Error: {e}")
+
+    # Save Memory
+    with open('price_memory.json', 'w') as f:
+        json.dump(memory, f)
 
 if __name__ == "__main__":
     run_val_bot()

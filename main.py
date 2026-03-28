@@ -7,58 +7,53 @@ import time
 API_KEY = os.getenv("ODDS_API_KEY")
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 CACHE_FILE = "sent_matches.json"
-SENSITIVITY = 30 # How many 'points' a line must move to trigger (e.g. -110 to -140)
-
-def get_sent_cache():
-    try:
-        with open(CACHE_FILE, 'r') as f:
-            return json.load(f)
-    except:
-        return {}
-
-def save_sent_cache(cache):
-    with open(CACHE_FILE, 'w') as f:
-        json.dump(cache, f)
 
 def send_discord_alert(message):
     if not DISCORD_WEBHOOK: return
     requests.post(DISCORD_WEBHOOK, json={"content": message}, timeout=10)
 
 def run_val_bot():
-    cache = get_sent_cache()
-    sports = ['basketball_nba', 'esports_csgo', 'leagueoflegends']
+    # Targeted eSports Slugs for Map-Specific Data
+    esports = ['esports_csgo', 'esports_lol', 'esports_dota2']
     
-    for sport in sports:
-        url = f"https://api.the-odds-api.com{sport}/odds/"
-        params = {'apiKey': API_KEY, 'regions': 'us', 'markets': 'h2h'}
+    for game_type in esports:
+        print(f"Analyzing Maps for {game_type}...")
+        
+        # We query specifically for Map Winner markets
+        url = f"https://api.the-odds-api.com{game_type}/odds/"
+        params = {
+            'apiKey': API_KEY,
+            'regions': 'us',
+            'markets': 'h2h_lay,h2h_1,h2h_2', # Pulls Match, Map 1, and Map 2 odds
+            'oddsFormat': 'american'
+        }
         
         try:
             res = requests.get(url, params=params, timeout=10)
             if res.status_code == 200:
                 data = res.json()
-                for game in data:
-                    match_id = game['id']
-                    # Get the current odds for the Favorite
-                    current_odds = game['bookmakers'][0]['markets'][0]['outcomes'][0]['price']
+                for match in data:
+                    match_name = f"{match['away_team']} vs {match['home_team']}"
                     
-                    # SMART MONEY LOGIC
-                    if match_id in cache:
-                        prev_odds = cache[match_id]['price']
-                        
-                        # Calculate movement (If odds drop from -110 to -150, that's 40 points)
-                        movement = prev_odds - current_odds
-                        
-                        if movement >= SENSITIVITY:
-                            msg = f"🚨 **SMART MONEY ALERT** 🚨\n{game['away_team']} @ {game['home_team']}\nLine Moved: {prev_odds} ➡️ {current_odds}\n*Heavy action detected!*"
-                            send_discord_alert(msg)
-                    
-                    # Update cache with latest price
-                    cache[match_id] = {'price': current_odds, 'time': time.time()}
-                    
+                    # LOGIC: Check for Map Discrepancies
+                    # If a team is -150 to win the match, but -300 to win Map 1, 
+                    # they are a "Map 1 Specialist." We alert this for DFS 'Over' plays.
+                    for bookmaker in match.get('bookmakers', []):
+                        for market in bookmaker.get('markets', []):
+                            market_key = market['key'] # e.g., 'h2h_1' (Map 1 Winner)
+                            
+                            if 'h2h_' in market_key:
+                                map_num = market_key.split('_')[-1]
+                                favorite = min(market['outcomes'], key=lambda x: x['price'])
+                                
+                                # High-Confidence Map Alert
+                                if favorite['price'] <= -250:
+                                    alert_msg = f"🗺️ **{game_type.upper()} MAP {map_num} ALERT**\nMatch: {match_name}\nMap {map_num} Lock: **{favorite['name']}** ({favorite['price']})\n*Perfect for Map 1 Kills/Stats Overs!*"
+                                    send_discord_alert(alert_msg)
+            else:
+                print(f"API Error {res.status_code}: {res.text}")
         except Exception as e:
-            print(f"Error: {e}")
-    
-    save_sent_cache(cache)
+            print(f"Error analyzing {game_type}: {e}")
 
 if __name__ == "__main__":
     run_val_bot()

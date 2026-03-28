@@ -13,43 +13,41 @@ def send_discord_alert(message):
     requests.post(DISCORD_WEBHOOK, json={"content": message}, timeout=10)
 
 def run_val_bot():
-    # Targeted eSports Slugs for Map-Specific Data
-    esports = ['esports_csgo', 'esports_lol', 'esports_dota2']
+    # Adding 'scores' to the list to see live progress
+    esports = ['esports_csgo', 'esports_lol']
     
     for game_type in esports:
-        print(f"Analyzing Maps for {game_type}...")
+        # 1. Fetch LIVE scores first
+        score_url = f"https://api.the-odds-api.com{game_type}/scores/"
+        score_res = requests.get(score_url, params={'apiKey': API_KEY, 'daysFrom': 1})
         
-        # We query specifically for Map Winner markets
-        url = f"https://api.the-odds-api.com{game_type}/odds/"
-        params = {
-            'apiKey': API_KEY,
-            'regions': 'us',
-            'markets': 'h2h_lay,h2h_1,h2h_2', # Pulls Match, Map 1, and Map 2 odds
-            'oddsFormat': 'american'
-        }
-        
-        try:
-            res = requests.get(url, params=params, timeout=10)
-            if res.status_code == 200:
-                data = res.json()
-                for match in data:
-                    match_name = f"{match['away_team']} vs {match['home_team']}"
+        # 2. Fetch LIVE odds
+        odds_url = f"https://api.the-odds-api.com{game_type}/odds/"
+        odds_params = {'apiKey': API_KEY, 'regions': 'us', 'markets': 'h2h'}
+        odds_res = requests.get(odds_url, params=odds_params)
+
+        if score_res.status_code == 200 and odds_res.status_code == 200:
+            scores = {s['id']: s for s in score_res.json()}
+            odds = odds_res.json()
+
+            for match in odds:
+                m_id = match['id']
+                if m_id in scores and not scores[m_id]['completed']:
+                    live_data = scores[m_id]
                     
-                    # LOGIC: Check for Map Discrepancies
-                    # If a team is -150 to win the match, but -300 to win Map 1, 
-                    # they are a "Map 1 Specialist." We alert this for DFS 'Over' plays.
-                    for bookmaker in match.get('bookmakers', []):
-                        for market in bookmaker.get('markets', []):
-                            market_key = market['key'] # e.g., 'h2h_1' (Map 1 Winner)
+                    # LOGIC: Check for 0-1 Comeback Opportunity
+                    # Find the team that is currently losing in maps
+                    for score_item in live_data.get('scores', []):
+                        if int(score_item['score']) == 0:
+                            trailing_team = score_item['name']
                             
-                            if 'h2h_' in market_key:
-                                map_num = market_key.split('_')[-1]
-                                favorite = min(market['outcomes'], key=lambda x: x['price'])
-                                
-                                # High-Confidence Map Alert
-                                if favorite['price'] <= -250:
-                                    alert_msg = f"🗺️ **{game_type.upper()} MAP {map_num} ALERT**\nMatch: {match_name}\nMap {map_num} Lock: **{favorite['name']}** ({favorite['price']})\n*Perfect for Map 1 Kills/Stats Overs!*"
-                                    send_discord_alert(alert_msg)
+                            # Check if the "Smart Money" still likes the trailing team
+                            for book in match['bookmakers']:
+                                for outcome in book['markets'][0]['outcomes']:
+                                    if outcome['name'] == trailing_team and outcome['price'] < 150:
+                                        msg = f"🔄 **LIVE COMEBACK ALERT** 🔄\nGame: {match['away_team']} vs {match['home_team']}\nStatus: **{trailing_team} is down 0-1**\nSmart Money Odds: **{outcome['price']}**\n*The model predicts a 2-1 Reverse Sweep!*"
+                                        send_discord_alert(msg)
+
             else:
                 print(f"API Error {res.status_code}: {res.text}")
         except Exception as e:

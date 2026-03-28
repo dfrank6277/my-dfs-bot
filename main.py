@@ -54,5 +54,9 @@ def run_val_bot():
 
 if __name__ == "__main__":
     print("Starting DFS Optimizer Bot...")
+    
+    # --- ADD THIS LINE HERE ---
+    send_discord_alert("Bot is ONLINE and scanning for plays! 🔍")
+    
     run_val_bot()
 

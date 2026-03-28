@@ -1,6 +1,7 @@
 import requests
 import os
 import json
+from urllib.parse import urljoin
 
 # --- CONFIGURATION ---
 API_KEY = os.getenv("ODDS_API_KEY")
@@ -17,13 +18,16 @@ def run_val_bot():
     # Official slugs for The-Odds-API
     sports = ['csgo_esl', 'leagueoflegends_lck', 'dota2_epic']
     
+    # THE BULLETPROOF BASE
+    base_url = "https://api.the-odds-api.com"
+    
     for game_type in sports:
         print(f"Scanning {game_type}...")
         
-        # --- BULLETPROOF URL FIX ---
-        # This manually builds the path to prevent 'mashing'
-        base = "https://api.the-odds-api.com"
-        full_url = f"{base}{game_type}/odds/"
+        # This library function FORCES the slashes to be correct
+        # Result: https://api.the-odds-api.comcsgo_esl/odds/
+        temp_url = urljoin(base_url, f"{game_type}/")
+        full_url = urljoin(temp_url, "odds/")
         
         params = {
             'apiKey': API_KEY,

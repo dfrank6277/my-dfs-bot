@@ -2,9 +2,8 @@ name: Run DFS Bot
 
 on:
   schedule:
-     to run the bot every 13 minutes
-     - cron: '*/13 * * * *'
-  workflow_dispatch:      # Allows you to run it manually
+    - cron: '*/13 * * * *'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -29,4 +28,3 @@ jobs:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           GRID_API_KEY: ${{ secrets.GRID_API_KEY }}
         run: python main.py
-

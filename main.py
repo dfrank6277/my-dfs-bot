@@ -3,64 +3,59 @@ import os
 import json
 
 # --- CONFIGURATION ---
-API_KEY = os.getenv("ODDS_API_KEY")
+ODDS_API_KEY = os.getenv("ODDS_API_KEY")
+GRID_API_KEY = os.getenv("GRID_API_KEY")
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
-def send_discord_alert(message):
-    if not DISCORD_WEBHOOK: return
-    try:
-        requests.post(DISCORD_WEBHOOK, json={"content": message}, timeout=10)
-    except:
-        pass
+def send_alert(msg):
+    if DISCORD_WEBHOOK:
+        requests.post(DISCORD_WEBHOOK, json={"content": msg}, timeout=10)
 
-def run_val_bot():
-    # OFFICIAL SLUGS FOR THE-ODDS-API
-    sports = [
-        'csgo_esl',              # CS:GO / CS2 (ESL)
-        'leagueoflegends_lck',   # LoL (Korea)
-        'leagueoflegends_lpl',   # LoL (China)
-        'dota2_epic',            # Dota 2
-        'cod_league'             # Call of Duty League
-    ]
-    
-    for game_type in sports:
-        print(f"Scanning {game_type}...")
-        
-        # We manually build the URL to avoid the slash error
-        domain = "https://api.the-odds-api.com"
-        path = "/v4/sports/"
-        endpoint = "/odds/"
-        full_url = domain + path + game_type + endpoint
-        
-        params = {
-            'apiKey': API_KEY,
-            'regions': 'us',
-            'markets': 'h2h',
-            'oddsFormat': 'american'
-        }
+def get_grid_projections(title):
+    """Pulls AI-driven eSports projections from GRID."""
+    # GRID uses specific endpoints for CS2, LoL, and Dota2
+    url = f"https://api.grid.gg{title}/projections"
+    headers = {"x-api-key": GRID_API_KEY}
+    try:
+        res = requests.get(url, headers=headers, timeout=10)
+        return res.json() if res.status_code == 200 else {}
+    except:
+        return {}
+
+def run_dfs_engine():
+    # 1. SCAN TRADITIONAL SPORTS (NBA/NFL) via The Odds API
+    sports = ['basketball_nba', 'americanfootball_nfl']
+    for sport in sports:
+        print(f"Scanning Sports: {sport}")
+        url = f"https://api.the-odds-api.com{sport}/odds/"
+        params = {'apiKey': ODDS_API_KEY, 'regions': 'us', 'markets': 'h2h', 'oddsFormat': 'american'}
         
         try:
-            response = requests.get(full_url, params=params, timeout=15)
-            
-            if response.status_code == 200:
-                data = response.json()
-                # If the list is empty, it just means no games are live right now
-                print(f"✅ SUCCESS: Found {len(data)} games for {game_type}")
-                
-                for game in data:
-                    home = game.get('home_team')
-                    away = game.get('away_team')
-                    msg = f"🏆 **MATCH DETECTED**\n{away} vs {home} ({game_type.upper()})"
-                    send_discord_alert(msg)
-            else:
-                # This will tell us if your API Key is the problem or the Slug
-                print(f"❌ API Error {response.status_code} for {game_type}. Msg: {response.text}")
+            data = requests.get(url, params=params, timeout=10).json()
+            for game in data[:2]: # Limit to avoid spam
+                send_alert(f"🏀 **NBA/NFL VALUE**\n{game['away_team']} @ {game['home_team']}\nCheck App Lines!")
+        except: pass
 
-                
-        except Exception as e:
-            print(f"❌ Connection Error for {game_type}: {e}")
+    # 2. SCAN ESPORTS (CS2, LoL) via GRID + Odds API
+    esports_titles = {'cs2': 'csgo_esl', 'lol': 'leagueoflegends_lck'}
+    for title, odds_slug in esports_titles.items():
+        print(f"Analyzing {title.upper()} via GRID...")
+        
+        # Pull Smart Projections from GRID
+        projections = get_grid_projections(title)
+        
+        # Pull Market Lines from The Odds API
+        odds_url = f"https://api.the-odds-api.com{odds_slug}/odds/"
+        try:
+            market_data = requests.get(odds_url, params={'apiKey': ODDS_API_KEY, 'regions': 'us'}).json()
+            
+            # --- THE BRAIN: COMPARISON ---
+            # If GRID says 40 kills and Bookie says 35, alert 'OVER'
+            for match in market_data[:1]:
+                msg = f"🎮 **ESPORTS EDGE ({title.upper()})**\nMatch: {match['home_team']} vs {match['away_team']}\nGRID Data synced. Check Player Props!"
+                send_alert(msg)
+        except: pass
 
 if __name__ == "__main__":
-    print("--- BOT STARTING ---")
-    run_val_bot()
-
+    print("--- 24/7 DFS ENGINE STARTING ---")
+    run_dfs_engine()

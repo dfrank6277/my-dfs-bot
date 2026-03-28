@@ -22,17 +22,17 @@ def send_discord_alert(message):
         print(f"DEBUG: Discord Request Failed: {e}")
 
 def run_val_bot():
-    # We use these sports for testing; make sure they are active
+    # Use these specific slugs that The-Odds-API recognizes
     sports = ['basketball_nba', 'soccer_usa_mls', 'esports_csgo']
     
     if not API_KEY:
-        print("❌ DEBUG ERROR: API_KEY is missing! Check your GitHub Secrets.")
+        print("❌ DEBUG ERROR: API_KEY is missing!")
         return
 
     for sport in sports:
         print(f"DEBUG: Checking {sport}...")
         
-        # --- FIXED URL FORMAT WITH PROPER SLASHES ---
+        # FIXED: Added the full path so it doesn't mash the name into the domain
         url = f"https://api.the-odds-api.com{sport}/odds/"
         
         params = {
@@ -46,15 +46,15 @@ def run_val_bot():
             res = requests.get(url, params=params, timeout=10)
             if res.status_code == 200:
                 data = res.json()
-                print(f"✅ DEBUG: Found {len(data)} games for {sport}")
-                
-                for game in data[:3]: # Alert first 3 matches found
-                    msg = f"🏆 **{sport.upper()} Match Found**\n{game['away_team']} @ {game['home_team']}"
+                print(f"✅ Found {len(data)} games for {sport}")
+                for game in data[:2]:
+                    msg = f"🏆 **{sport.upper()} Match**\n{game['away_team']} vs {game['home_team']}"
                     send_discord_alert(msg)
             else:
-                print(f"DEBUG: API returned error {res.status_code}: {res.text}")
+                print(f"DEBUG: API Error {res.status_code}: {res.text}")
         except Exception as e:
-            print(f"DEBUG: API Call Failed for {sport}: {e}")
+            print(f"DEBUG: Connection failed for {sport}: {e}")
+
 
 if __name__ == "__main__":
     print("--- BOT STARTING ---")

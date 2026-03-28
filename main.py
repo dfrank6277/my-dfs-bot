@@ -20,10 +20,13 @@ def run_val_bot():
     for game_type in sports:
         print(f"Scanning {game_type}...")
         
-        # --- THE BULLETPROOF URL FIX ---
-        # Note the explicit /v4/sports/ and the trailing /odds/
-        base_url = "https://api.the-odds-api.com"
-        full_url = base_url + game_type + "/odds/"
+        # --- THE ULTIMATE URL FIX ---
+        # We manually build the string with a forced /v4/sports/ segment
+        domain = "https://api.the-odds-api.com"
+        path = "/v4/sports/"
+        endpoint = "/odds/"
+        
+        full_url = domain + path + game_type + endpoint
         
         params = {
             'apiKey': API_KEY,
@@ -33,7 +36,7 @@ def run_val_bot():
         }
         
         try:
-            # We use the full_url we just built manually
+            print(f"DEBUG: Visiting {full_url}")
             response = requests.get(full_url, params=params, timeout=15)
             
             if response.status_code == 200:
@@ -49,8 +52,8 @@ def run_val_bot():
                 print(f"❌ API Error {response.status_code}: {response.text}")
                 
         except Exception as e:
-            # This will now show the EXACT URL it tried to visit
-            print(f"❌ Connection Error for {game_type}. Tried to visit: {full_url}")
+            print(f"❌ Connection Error for {game_type}.")
+            print(f"Tried to visit: {full_url}")
             print(f"Error Details: {e}")
 
 if __name__ == "__main__":

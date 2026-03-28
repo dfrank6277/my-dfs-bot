@@ -27,8 +27,7 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           GOOGLE_SHEETS_JSON: ${{ secrets.GOOGLE_SHEETS_JSON }}
         run: python main.py
-        import os
-import json
+        
 
 def send_discord_alert(message):
     webhook_url = os.getenv("DISCORD_WEBHOOK") # Securely get from GitHub Secrets

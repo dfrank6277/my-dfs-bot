@@ -1,16 +1,26 @@
+import requests
+import os
+import json
+
+# --- CONFIGURATION ---
+API_KEY = os.getenv("ODDS_API_KEY")
+DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
+
+def send_discord_alert(message):
+    if not DISCORD_WEBHOOK: return
+    try:
+        requests.post(DISCORD_WEBHOOK, json={"content": message}, timeout=10)
+    except:
+        pass
+
 def run_val_bot():
-    # --- UPDATED SPORT SLUGS ---
-    sports = [
-        'csgo',             # Counter-Strike (was esports_csgo)
-        'leagueoflegends',  # League of Legends (was esports_lol)
-        'dota2',            # Dota 2
-        'pointspread_cod'   # Call of Duty
-    ]
+    # Corrected sport slugs for The-Odds-API
+    sports = ['csgo', 'leagueoflegends', 'dota2', 'pointspread_cod']
     
     for game_type in sports:
         print(f"Scanning {game_type}...")
         
-        # URL Logic (Already fixed!)
+        # Build the URL carefully
         domain = "https://api.the-odds-api.com"
         path = "/v4/sports/"
         endpoint = "/odds/"
@@ -37,3 +47,11 @@ def run_val_bot():
                     send_discord_alert(msg)
             else:
                 print(f"❌ API Error {response.status_code} for {game_type}")
+                
+        except Exception as e:
+            print(f"❌ Connection Error for {game_type}: {e}")
+
+if __name__ == "__main__":
+    print("--- BOT STARTING ---")
+    run_val_bot()
+

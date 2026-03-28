@@ -14,13 +14,19 @@ def send_discord_alert(message):
         pass
 
 def run_val_bot():
-    # Corrected sport slugs for The-Odds-API
-    sports = ['csgo', 'leagueoflegends', 'dota2', 'pointspread_cod']
+    # OFFICIAL SLUGS FOR THE-ODDS-API
+    sports = [
+        'csgo_esl',              # CS:GO / CS2 (ESL)
+        'leagueoflegends_lck',   # LoL (Korea)
+        'leagueoflegends_lpl',   # LoL (China)
+        'dota2_epic',            # Dota 2
+        'cod_league'             # Call of Duty League
+    ]
     
     for game_type in sports:
         print(f"Scanning {game_type}...")
         
-        # Build the URL carefully
+        # We manually build the URL to avoid the slash error
         domain = "https://api.the-odds-api.com"
         path = "/v4/sports/"
         endpoint = "/odds/"
@@ -38,6 +44,7 @@ def run_val_bot():
             
             if response.status_code == 200:
                 data = response.json()
+                # If the list is empty, it just means no games are live right now
                 print(f"✅ SUCCESS: Found {len(data)} games for {game_type}")
                 
                 for game in data:
@@ -46,7 +53,9 @@ def run_val_bot():
                     msg = f"🏆 **MATCH DETECTED**\n{away} vs {home} ({game_type.upper()})"
                     send_discord_alert(msg)
             else:
-                print(f"❌ API Error {response.status_code} for {game_type}")
+                # This will tell us if your API Key is the problem or the Slug
+                print(f"❌ API Error {response.status_code} for {game_type}. Msg: {response.text}")
+
                 
         except Exception as e:
             print(f"❌ Connection Error for {game_type}: {e}")

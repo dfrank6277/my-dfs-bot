@@ -2,72 +2,67 @@ import requests
 import os
 import json
 import time
-import base64
 
-# --- CONFIGURATION (GitHub Secrets) ---
+# --- CONFIGURATION ---
 API_KEY = os.getenv("ODDS_API_KEY")
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 GRID_API_KEY = os.getenv("GRID_API_KEY")
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN") # Needed for the bot to "Remember" picks
+CACHE_FILE = "sent_matches.json"
 
-def send_discord_alert(message):
-    if not DISCORD_WEBHOOK:
-        return
-    data = {"content": message, "username": "DFS Optimizer Pro"}
+def get_sent_cache():
+    """Loads the list of matches we already alerted."""
     try:
-        requests.post(DISCORD_WEBHOOK, json=data, timeout=10)
+        with open(CACHE_FILE, 'r') as f:
+            return json.load(f)
     except:
-        pass
+        return {}
 
-def save_to_history(new_pick):
-    """
-    This is the 'Self-Improvement' Memory. 
-    It logs the pick so the bot can back-test tomorrow.
-    """
-    print(f"Logged to History: {new_pick['player']}")
-    # In a full cloud setup, this goes to a DB. 
-    # For GitHub Actions, we print it so it's saved in the 'Action Logs'.
-    print(f"BACKTEST_DATA|{json.dumps(new_pick)}")
+def save_sent_cache(cache):
+    """Saves the updated list of matches."""
+    with open(CACHE_FILE, 'w') as f:
+        json.dump(cache, f)
+
+def send_discord_alert(message, match_id, cache):
+    """Only sends to Discord if we haven't sent this match_id recently."""
+    if match_id in cache:
+        print(f"Skipping duplicate match: {match_id}")
+        return False
+    
+    if not DISCORD_WEBHOOK: return False
+    
+    requests.post(DISCORD_WEBHOOK, json={"content": message}, timeout=10)
+    cache[match_id] = time.time() # Mark as sent
+    return True
 
 def run_val_bot():
-    # Focused on top eSports and NBA for maximum 'Edge'
+    cache = get_sent_cache()
     sports = ['basketball_nba', 'esports_csgo', 'leagueoflegends']
     
     for sport in sports:
-        print(f"Analyzing {sport}...")
-        # Note: In a real 'Grid' setup, you'd call your specific Grid API URL here
         url = f"https://api.the-odds-api.com{sport}/odds/"
-        params = {'apiKey': API_KEY, 'regions': 'us', 'markets': 'h2h', 'oddsFormat': 'american'}
+        params = {'apiKey': API_KEY, 'regions': 'us', 'markets': 'h2h'}
         
         try:
             res = requests.get(url, params=params, timeout=10)
             if res.status_code == 200:
                 data = res.json()
                 for game in data:
-                    # SIMULATED GRID COMPARISON (Modeling Top 5 Platforms)
-                    # We look for a 'Value Gap' of 10% or more
-                    home_team = game.get('home_team')
-                    away_team = game.get('away_team')
+                    match_id = game['id'] # Unique ID from the API
                     
-                    # Logic: If market probability is > 65%, we flag it
-                    alert_msg = f"🔥 **HIGH VALUE {sport.upper()}**\n{away_team} @ {home_team}\nConfidence: High"
+                    # ALERT LOGIC
+                    msg = f"🔥 **{sport.upper()} PLAY**\n{game['away_team']} @ {game['home_team']}"
                     
-                    # 1. Alert Discord
-                    send_discord_alert(alert_msg)
-                    
-                    # 2. Save for Self-Learning/Backtesting
-                    save_to_history({
-                        "player": f"{away_team} vs {home_team}",
-                        "sport": sport,
-                        "timestamp": time.time()
-                    })
-            else:
-                print(f"API Error: {res.status_code}")
+                    # Try to send (Filter handles duplicates)
+                    sent = send_discord_alert(msg, match_id, cache)
+                    if sent:
+                        print(f"New match alerted: {match_id}")
         except Exception as e:
-            print(f"Error checking {sport}: {e}")
+            print(f"Error: {e}")
+    
+    # Cleanup old matches (older than 24 hours) to keep cache small
+    current_time = time.time()
+    cache = {k: v for k, v in cache.items() if current_time - v < 86400}
+    save_sent_cache(cache)
 
 if __name__ == "__main__":
-    print("--- BOT STARTING (Self-Learning Mode) ---")
-    send_discord_alert("🤖 Bot is Online & Analyzing Grid Data...")
     run_val_bot()
-

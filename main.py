@@ -1,8 +1,8 @@
 import requests
 import os
-import json
+from urllib.parse import urljoin
 
-# --- CONFIGURATION (GitHub Secrets) ---
+# --- CONFIGURATION ---
 API_KEY = os.getenv("ODDS_API_KEY")
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
@@ -14,16 +14,24 @@ def send_alert(message):
         pass
 
 def run_dfs_engine():
-    # Official sport keys
-    sports = ['basketball_nba', 'soccer_usa_mls', 'baseball_mlb']
+    # UPDATED KEYS FROM YOUR LIST
+    sports = [
+        'basketball_nba', 
+        'baseball_mlb', 
+        'americanfootball_nfl', 
+        'soccer_usa_mls'
+    ]
     
-    for sport in sports:
-        print(f"Scanning {sport}...")
+    # THE BULLETPROOF BASE
+    base_url = "https://api.the-odds-api.com"
+    
+    for sport_key in sports:
+        print(f"Scanning {sport_key}...")
         
-        # --- THE ULTIMATE URL FIX ---
-        # We use a hard-coded base and add the sport and /odds/ manually
-        base_url = "https://api.the-odds-api.com"
-        full_url = base_url + sport + "/odds/"
+        # urljoin forces the slash between .com and the sport key
+        # Result: https://api.the-odds-api.combasketball_nba/odds/
+        temp_url = urljoin(base_url, f"{sport_key}/")
+        full_url = urljoin(temp_url, "odds/")
         
         params = {
             'apiKey': API_KEY,
@@ -33,21 +41,20 @@ def run_dfs_engine():
         }
         
         try:
-            # We call the full_url we just built manually
+            print(f"DEBUG: Visiting {full_url}")
             response = requests.get(full_url, params=params, timeout=15)
             
             if response.status_code == 200:
                 data = response.json()
-                print(f"✅ SUCCESS: Found {len(data)} games for {sport}")
+                print(f"✅ SUCCESS: Found {len(data)} games for {sport_key}")
                 for game in data:
-                    msg = f"🏆 **{sport.upper()} MATCH**\n{game['away_team']} @ {game['home_team']}"
+                    msg = f"🏆 **MATCH FOUND**\n{game.get('away_team')} vs {game.get('home_team')} ({sport_key.upper()})"
                     send_alert(msg)
             else:
                 print(f"❌ API Error {response.status_code}: {response.text}")
                 
         except Exception as e:
-            # This will now show the EXACT URL it tried to visit in the logs
-            print(f"❌ Connection Error for {sport}. Tried to visit: {full_url}")
+            print(f"❌ Connection Error for {sport_key}. Tried: {full_url}")
             print(f"Error Details: {e}")
 
 if __name__ == "__main__":

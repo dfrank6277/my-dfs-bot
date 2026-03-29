@@ -1,39 +1,55 @@
 import requests
 import os
 import json
+import time
 
 # --- CONFIGURATION ---
 API_KEY = os.getenv("ODDS_API_KEY")
-DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
+WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
 def send_alert(message):
-    if not DISCORD_WEBHOOK: return
-    requests.post(DISCORD_WEBHOOK, json={"content": message}, timeout=10)
+    if not WEBHOOK: return
+    requests.post(WEBHOOK, json={"content": message}, timeout=10)
 
-def run_dfs_engine():
-    # TEST: If the key is empty, the bot will tell us here
-    if not API_KEY:
-        print("❌ CRITICAL ERROR: API_KEY is empty in GitHub Secrets!")
-        return
-
-    NBA_PROPS = ['player_points', 'player_rebounds', 'player_assists']
+def run_val_bot():
+    # These are the exact keys from your list!
+    sports_to_scan = [
+        'basketball_nba', 
+        'baseball_mlb', 
+        'icehockey_nhl',
+        'soccer_epl',
+        'soccer_usa_mls',
+        'americanfootball_nfl'
+    ]
     
-    for prop in NBA_PROPS:
-        # THE FIX: Hard-coding the query string into the URL
-        url = f"https://api.the-odds-api.com{API_KEY}&regions=us&markets={prop}&oddsFormat=american&bookmakers=fanduel,draftkings"
+    for sport in sports_to_scan:
+        print(f"Scanning {sport}...")
+        
+        # DEFINITIVE URL FIX: Manually built to prevent mashing
+        url = f"https://api.the-odds-api.com{sport}/odds/"
+        params = {
+            'apiKey': API_KEY,
+            'regions': 'us',
+            'markets': 'h2h',
+            'oddsFormat': 'american'
+        }
         
         try:
-            print(f"DEBUG: Visiting URL (Key Hidden)...")
-            res = requests.get(url, timeout=15)
-            data = res.json()
-            
-            if isinstance(data, list):
-                print(f"✅ SUCCESS: Found {len(data)} games for {prop}")
+            res = requests.get(url, params=params, timeout=15)
+            if res.status_code == 200:
+                data = res.json()
+                print(f"✅ SUCCESS: Found {len(data)} games for {sport}")
                 for game in data:
-                    # ... (rest of your logic to post to Discord)
-                    pass
+                    msg = f"🏆 **{sport.upper()} MATCH**\n{game['away_team']} @ {game['home_team']}"
+                    send_alert(msg)
             else:
-                # If it still shows 'Welcome', we'll see the exact message here
+                print(f"❌ API Error {res.status_code} for {sport}")
+        except Exception as e:
+            print(f"❌ Connection Error for {sport}: {e}")
+
+if __name__ == "__main__":
+    send_alert("🚀 **Universal Bot Online** - Scanning NBA, MLB, NHL, and Soccer...")
+    run_val_bot()
                 print(f"❌ API Rejected Key. Message: {data.get('message')}")
         except Exception as e:
             print(f"❌ Connection Error: {e}")

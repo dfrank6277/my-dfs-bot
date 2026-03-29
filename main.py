@@ -51,8 +51,8 @@ def run_dfs_engine():
                                     price = outcome.get('price')
                                     line = outcome.get('point', 'N/A')
 
-                                    # VEGAS EDGE: Alert if price is -105 or better
-                                    if price and price <= -105:
+                                    # VEGAS EDGE: Alert if price is -400 or better
+                                    if price and price <= -400:
                                         m_id = f"{player}_{prop}_{line}"
                                         if m_id not in cache:
                                             # Deep Links

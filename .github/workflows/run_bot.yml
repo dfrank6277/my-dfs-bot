@@ -1,7 +1,7 @@
 name: Run DFS Bot
 on:
   schedule:
-    - cron: '*/13 * * * *'
+    - cron: '*/13 * * * *' # Runs every 13 minutes
   workflow_dispatch:
 
 jobs:
@@ -16,9 +16,10 @@ jobs:
           python-version: '3.9'
       - name: Install dependencies
         run: pip install requests
-      - name: Run Bot
+      - name: Run Bot & Auditor
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-          GRID_API_KEY: ${{ secrets.GRID_API_KEY }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        run: python main.py
+        run: |
+          python main.py
+          python auditor.py

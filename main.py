@@ -1,6 +1,6 @@
 import requests
 import os
-from urllib.parse import urljoin
+import json
 
 # --- CONFIGURATION ---
 API_KEY = os.getenv("ODDS_API_KEY")
@@ -14,24 +14,15 @@ def send_alert(message):
         pass
 
 def run_dfs_engine():
-    # UPDATED KEYS FROM YOUR LIST
-    sports = [
-        'basketball_nba', 
-        'baseball_mlb', 
-        'americanfootball_nfl', 
-        'soccer_usa_mls'
-    ]
-    
-    # THE BULLETPROOF BASE
-    base_url = "https://api.the-odds-api.com"
+    # Official keys from your list
+    sports = ['basketball_nba', 'baseball_mlb', 'americanfootball_nfl', 'soccer_usa_mls']
     
     for sport_key in sports:
         print(f"Scanning {sport_key}...")
         
-        # urljoin forces the slash between .com and the sport key
-        # Result: https://api.the-odds-api.combasketball_nba/odds/
-        temp_url = urljoin(base_url, f"{sport_key}/")
-        full_url = urljoin(temp_url, "odds/")
+        # --- THE BULLETPROOF URL FIX ---
+        # We hard-code the /v4/sports/ path so it can NEVER be stripped
+        full_url = f"https://api.the-odds-api.com{sport_key}/odds/"
         
         params = {
             'apiKey': API_KEY,
@@ -48,15 +39,16 @@ def run_dfs_engine():
                 data = response.json()
                 print(f"✅ SUCCESS: Found {len(data)} games for {sport_key}")
                 for game in data:
-                    msg = f"🏆 **MATCH FOUND**\n{game.get('away_team')} vs {game.get('home_team')} ({sport_key.upper()})"
+                    home = game.get('home_team')
+                    away = game.get('away_team')
+                    msg = f"🏆 **MATCH FOUND**\n{away} vs {home} ({sport_key.upper()})"
                     send_alert(msg)
             else:
                 print(f"❌ API Error {response.status_code}: {response.text}")
                 
         except Exception as e:
-            print(f"❌ Connection Error for {sport_key}. Tried: {full_url}")
-            print(f"Error Details: {e}")
+            print(f"❌ Connection Error for {sport_key}: {e}")
 
 if __name__ == "__main__":
-    print("--- OFFICIAL DFS ENGINE ONLINE ---")
+    print("--- 24/7 DFS ENGINE ONLINE ---")
     run_dfs_engine()

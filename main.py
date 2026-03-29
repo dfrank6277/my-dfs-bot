@@ -10,19 +10,46 @@ MARKETS = ["player_points"]
 BOOKMAKERS = "draftkings,fanduel,betmgm,caesars"
 DFS_URL = "https://api.prizepicks.com/projections"
 
-EDGE_THRESHOLD = 2.0
+EDGE_THRESHOLD = 1.5
 
 # ------------------ UTIL ------------------
 
 def send_alert(message):
     if not WEBHOOK_URL:
-        print("No webhook set")
+        print(message)
         return
 
     requests.post(WEBHOOK_URL, json={"content": message})
 
 def normalize(name):
     return name.lower().strip()
+
+# ------------------ GRADING ------------------
+
+def grade_prop(edge):
+    abs_edge = abs(edge)
+
+    score = 0
+
+    if abs_edge >= 3:
+        score += 5
+    elif abs_edge >= 2:
+        score += 4
+    elif abs_edge >= 1.5:
+        score += 3
+    elif abs_edge >= 1:
+        score += 2
+    else:
+        score += 1
+
+    if score >= 5:
+        return "A"
+    elif score == 4:
+        return "B"
+    elif score == 3:
+        return "C"
+    else:
+        return "D"
 
 # ------------------ DFS DATA ------------------
 
@@ -109,6 +136,7 @@ def find_edges(sportsbook_props, dfs_props):
             continue
 
         pick = "OVER" if diff > 0 else "UNDER"
+        grade = grade_prop(diff)
 
         edges.append({
             "player": prop["player"],
@@ -116,11 +144,27 @@ def find_edges(sportsbook_props, dfs_props):
             "dfs_line": dfs_line,
             "book_line": book_line,
             "edge": round(diff, 2),
+            "score": abs(diff),
             "pick": pick,
+            "grade": grade,
             "game": prop["game"]
         })
 
-    return sorted(edges, key=lambda x: abs(x["edge"]), reverse=True)
+    return sorted(edges, key=lambda x: x["score"], reverse=True)
+
+# ------------------ RANKINGS ------------------
+
+def send_rankings(edges):
+    msg = "📊 DFS EDGE RANKINGS\n\n"
+
+    for e in edges[:10]:
+        msg += (
+            f"{e['grade']} | {e['player']}\n"
+            f"{e['pick']} {e['dfs_line']} {e['stat']}\n"
+            f"Edge: {e['edge']}\n\n"
+        )
+
+    send_alert(msg)
 
 # ------------------ SLIP BUILDER ------------------
 
@@ -128,14 +172,16 @@ def build_slips(edges):
     slips = []
     used_games = set()
 
-    for edge in edges:
+    filtered = [e for e in edges if e["grade"] in ["A", "B"]]
+
+    for edge in filtered:
         if edge["game"] in used_games:
             continue
 
         slip = [edge]
         used_games.add(edge["game"])
 
-        for other in edges:
+        for other in filtered:
             if other["game"] in used_games:
                 continue
 
@@ -150,14 +196,14 @@ def build_slips(edges):
 
     return slips[:3]
 
-# ------------------ DISCORD FORMAT ------------------
+# ------------------ DISCORD OUTPUT ------------------
 
 def send_slip(slip):
     msg = "🎯 DFS SNIPER SLIP\n\n"
 
     for leg in slip:
         msg += (
-            f"{leg['player']}\n"
+            f"{leg['grade']} | {leg['player']}\n"
             f"{leg['pick']} {leg['dfs_line']} {leg['stat']}\n"
             f"Book: {leg['book_line']} | Edge: {leg['edge']}\n\n"
         )
@@ -181,6 +227,8 @@ def main():
         return
 
     print(f"Found {len(edges)} edges")
+
+    send_rankings(edges)
 
     slips = build_slips(edges)
 

@@ -3,11 +3,12 @@ import os
 import json
 import time
 
-# --- CONFIGURATION ---
+# --- 1. CONFIGURATION (GitHub Secrets) ---
 API_KEY = os.getenv("ODDS_API_KEY")
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
+CACHE_FILE = "sent_matches.json"
 
-# Major NBA props
+# NBA props to scan
 NBA_PROPS = ['player_points', 'player_rebounds', 'player_assists']
 
 def send_alert(message):
@@ -18,12 +19,20 @@ def send_alert(message):
         pass
 
 def run_dfs_engine():
-    # TEMPORARY: Clear cache to force immediate posts for testing
-    cache = {} 
+    # Load Cache to prevent duplicate pings
+    try:
+        with open(CACHE_FILE, 'r') as f:
+            cache = json.read(f)
+    except:
+        cache = {}
 
-    print("--- 🏀 GLOBAL SCAN: SHOWING ALL PLAYS ---")
+    print("--- 🏀 NBA PROP SCAN STARTING ---")
+    
     for prop in NBA_PROPS:
-        url = "https://api.the-odds-api.com"
+        # THE FIX: Absolute path from the documentation you provided
+        # Format: /v4/sports/{sport}/odds/
+        url = f"https://api.the-odds-api.com"
+        
         params = {
             'apiKey': API_KEY,
             'regions': 'us',
@@ -37,12 +46,13 @@ def run_dfs_engine():
             res = requests.get(url, params=params, timeout=15)
             data = res.json()
             
+            # If the response is a list, it's successful data
             if isinstance(data, list):
                 if len(data) == 0:
-                    print(f"ℹ️ No active lines for {prop} yet.")
+                    print(f"ℹ️ No active lines for {prop} right now.")
                     continue
                 
-                print(f"✅ Data found! Posting to Discord...")
+                print(f"✅ SUCCESS: Found {len(data)} games for {prop}")
                 for game in data:
                     for book in game.get('bookmakers', []):
                         for market in book.get('markets', []):
@@ -51,19 +61,28 @@ def run_dfs_engine():
                                 line = outcome.get('point')
                                 price = outcome.get('price')
                                 
-                                # NO FILTER: Every play gets posted
-                                msg = (f"🏀 **NBA PROP DETECTED**\n"
-                                       f"Player: **{player}**\n"
-                                       f"Prop: {prop.replace('player_', '').capitalize()}\n"
-                                       f"Line: {line}\n"
-                                       f"Odds: {price}")
-                                send_alert(msg)
+                                # UNIQUE ID: Prevents duplicate alerts for the same line
+                                m_id = f"{player}_{prop}_{line}"
+                                if m_id not in cache:
+                                    msg = (f"🏀 **NBA PROP DETECTED**\n"
+                                           f"Player: **{player}**\n"
+                                           f"Prop: {prop.replace('player_', '').capitalize()}\n"
+                                           f"Line: {line}\n"
+                                           f"Odds: {price}")
+                                    send_alert(msg)
+                                    cache[m_id] = time.time()
             else:
-                print(f"⚠️ API Info: {data}")
+                # This will print the specific API error if it's not a list
+                print(f"❌ API Error: {data.get('message', 'Unknown Error')}")
 
         except Exception as e:
-            print(f"❌ Error on {prop}: {e}")
+            print(f"❌ System Error on {prop}: {e}")
+
+    # Save Cache
+    with open(CACHE_FILE, 'w') as f:
+        json.dump(cache, f)
 
 if __name__ == "__main__":
-    send_alert("🔍 **LIVE FEED STARTING** - Showing every active NBA line...")
+    # Test Heartbeat
+    send_alert("🚀 **NBA SCAN INITIATED** - Scanning Points, Rebounds, and Assists...")
     run_dfs_engine()

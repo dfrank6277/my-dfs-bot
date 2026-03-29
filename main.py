@@ -1,40 +1,22 @@
 import requests
 import os
 import json
-import time
 
-# --- CONFIGURATION ---
+# --- CONFIGURATION (GitHub Secrets) ---
 API_KEY = os.getenv("ODDS_API_KEY")
-WEBHOOK = os.getenv("DISCORD_WEBHOOK")
-CACHE_FILE = "price_memory.json"
+DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
 def send_alert(message):
-    if not WEBHOOK: return
-    try:
-        requests.post(WEBHOOK, json={"content": message}, timeout=10)
-    except:
-        pass
+    if not DISCORD_WEBHOOK: return
+    requests.post(DISCORD_WEBHOOK, json={"content": message})
 
-def run_val_bot():
-    # Memory for tracking line movement
-    memory = {}
-    if os.path.exists(CACHE_FILE):
-        try:
-            with open(CACHE_FILE, 'r') as f:
-                memory = json.load(f)
-        except:
-            pass
-
-    # THE SPORTS TO SCAN
-    sports = ['basketball_nba', 'baseball_mlb', 'soccer_usa_mls', 'icehockey_nhl']
+def run_dfs_engine():
+    # This matches the 'Step 2' sport keys from the official samples
+    sports = ['basketball_nba', 'soccer_usa_mls', 'baseball_mlb']
     
     for sport in sports:
-        print(f"Scanning {sport}...")
-        
-        # --- BULLETPROOF URL FIX ---
-        # Explicitly building the path with a forced slash
-        base_url = "https://api.the-odds-api.com"
-        full_url = base_url + sport + "/odds/"
+        # OFFICIAL URL STRUCTURE from ://github.com
+        url = f'https://api.the-odds-api.com{sport}/odds'
         
         params = {
             'apiKey': API_KEY,
@@ -44,37 +26,21 @@ def run_val_bot():
         }
         
         try:
-            # We add a 15 second timeout to prevent the bot from hanging
-            res = requests.get(full_url, params=params, timeout=15)
+            response = requests.get(url, params=params)
             
-            if res.status_code == 200:
-                data = res.json()
+            if response.status_code == 200:
+                data = response.json()
                 print(f"✅ SUCCESS: Found {len(data)} games for {sport}")
-                
                 for game in data:
-                    m_id = game['id']
-                    # Look for price movement logic...
-                    for book in game.get('bookmakers', []):
-                        for market in book.get('markets', []):
-                            for outcome in market.get('outcomes', []):
-                                price = outcome['price']
-                                team = outcome['name']
-                                
-                                # If movement is detected, send to Discord
-                                # Update memory
-                                memory[m_id] = {'price': price, 'team': team}
+                    # Logic to find your "Edge"
+                    msg = f"🏆 **{sport.upper()} MATCH**\n{game['away_team']} @ {game['home_team']}"
+                    send_alert(msg)
             else:
-                print(f"❌ API Error {res.status_code}: {res.text}")
+                # This catches the 'INVALID_KEY' error specifically
+                print(f"❌ API Error {response.status_code}: {response.text}")
                 
         except Exception as e:
-            # This will show the EXACT URL it tried to visit in the logs
-            print(f"❌ Connection Error for {sport}. Tried: {full_url}")
-            print(f"Error Details: {e}")
-
-    # Save Memory
-    with open(CACHE_FILE, 'w') as f:
-        json.dump(memory, f)
+            print(f"❌ Connection Error: {e}")
 
 if __name__ == "__main__":
-    print("--- 24/7 UNIVERSAL SCANNER ONLINE ---")
-    run_val_bot()
+    run_dfs_engine()

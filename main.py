@@ -7,7 +7,6 @@ API_KEY = os.getenv("ODDS_API_KEY")
 WEBHOOK = os.getenv("DISCORD_WEBHOOK_URL")
 
 CACHE_FILE = "sent_cache.json"
-SCAN_INTERVAL = 900  # 15 minutes
 
 SPORT_PROPS = {
     'basketball_nba': ['player_points', 'player_rebounds', 'player_assists'],
@@ -63,11 +62,9 @@ def is_plus_ev(price):
     if prob is None:
         return False, 0, 0
 
-    dfs_prob = 0.50  # DFS lines assume ~50%
-
     ev = calculate_ev(prob)
 
-    return ev > 0.05, prob, ev  # only alert if EV > 5%
+    return ev > 0.05, prob, ev  # change to 0.08 for stricter filtering
 
 # ------------------ CORE ENGINE ------------------ #
 
@@ -155,18 +152,14 @@ def main():
     print("API KEY LOADED:", bool(API_KEY))
     print("WEBHOOK LOADED:", bool(WEBHOOK))
 
-    send_alert("DFS BOT LIVE - +EV MODE ENABLED")
+    send_alert("DFS BOT RUNNING (+EV scan)")
 
-    while True:
-        try:
-            run_engine()
-            print("Cycle complete. Sleeping...\n")
-            time.sleep(SCAN_INTERVAL)
+    try:
+        run_engine()
+        print("Run complete.")
 
-        except Exception as e:
-            print(f"Critical error: {e}")
-            time.sleep(60)
+    except Exception as e:
+        print(f"Critical error: {e}")
 
 if __name__ == "__main__":
     main()
-

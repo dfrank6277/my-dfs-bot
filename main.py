@@ -9,17 +9,13 @@ WEBHOOK = os.getenv("DISCORD_WEBHOOK_URL")
 CACHE_FILE = "sent_cache.json"
 
 SPORT_PROPS = {
-    'basketball_nba': ['player_points', 'player_rebounds', 'player_assists'],
-    'americanfootball_nfl': ['player_pass_yds', 'player_rush_yds'],
-    'baseball_mlb': ['player_hits', 'player_home_runs']
+    'basketball_nba': ['player_points'],
 }
 
-# ✅ RELAXED SETTINGS (so you actually get plays)
 MIN_EV = 0.01
 STRONG_EV = 0.02
-MIN_ODDS = -300
 
-# ------------------ UTIL ------------------ #
+# ---------------- UTIL ---------------- #
 
 def send_alert(message):
     if not WEBHOOK:
@@ -41,40 +37,31 @@ def save_cache(cache):
     with open(CACHE_FILE, "w") as f:
         json.dump(cache, f)
 
-def build_links(player):
-    q = player.replace(" ", "%20")
-    return (
-        f"https://app.prizepicks.com/?search={q}",
-        f"https://underdogfantasy.com/search?q={q}"
-    )
-
-# ------------------ EV LOGIC ------------------ #
+# ---------------- EV ---------------- #
 
 def american_to_prob(odds):
-    if odds is None:
-        return None
     if odds < 0:
         return abs(odds) / (abs(odds) + 100)
-    else:
-        return 100 / (odds + 100)
+    return 100 / (odds + 100)
 
-def calculate_ev(prob, payout=1.0):
-    return (prob * payout) - (1 - prob)
+def calculate_ev(prob):
+    return (prob * 1.0) - (1 - prob)
 
-def is_plus_ev(price):
-    prob = american_to_prob(price)
+# ---------------- API ---------------- #
 
-    if prob is None:
-        return False, 0, 0
+def fetch_events(sport):
+    url = f"https://api.the-odds-api.com/v4/sports/{sport}/events"
+    params = {"apiKey": API_KEY}
 
-    ev = calculate_ev(prob)
+    res = requests.get(url, params=params)
+    if res.status_code != 200:
+        print("Event fetch failed:", res.text)
+        return []
 
-    return ev > MIN_EV, prob, ev
+    return res.json()
 
-# ------------------ CORE ENGINE ------------------ #
-
-def fetch_odds(sport, market):
-    url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds"
+def fetch_event_props(sport, event_id, market):
+    url = f"https://api.the-odds-api.com/v4/sports/{sport}/events/{event_id}/odds"
 
     params = {
         "apiKey": API_KEY,
@@ -84,21 +71,26 @@ def fetch_odds(sport, market):
         "bookmakers": "draftkings,fanduel"
     }
 
-    try:
-        res = requests.get(url, params=params, timeout=15)
+    res = requests.get(url, params=params)
 
-        if res.status_code != 200:
-            print(f"API error {res.status_code}: {res.text}")
-            return []
+    if res.status_code != 200:
+        print("Props fetch failed:", res.text)
+        return None
 
-        return res.json()
+    return res.json()
 
-    except Exception as e:
-        print(f"Fetch error: {e}")
-        return []
+# ---------------- CORE ---------------- #
 
-def process_game(game, sport, market, cache, found_flag):
-    for book in game.get("bookmakers", []):
+def process_event(event, sport, market, cache, found_flag):
+    event_id = event["id"]
+    home = event["home_team"]
+    away = event["away_team"]
+
+    data = fetch_event_props(sport, event_id, market)
+    if not data:
+        return
+
+    for book in data.get("bookmakers", []):
         for m in book.get("markets", []):
             for outcome in m.get("outcomes", []):
 
@@ -109,77 +101,52 @@ def process_game(game, sport, market, cache, found_flag):
                 if not player or price is None:
                     continue
 
-                # ✅ DEBUG LOG
-                print(f"Checking: {player} | Odds: {price}")
+                prob = american_to_prob(price)
+                ev = calculate_ev(prob)
 
-                if price < MIN_ODDS:
+                print(f"{player} | Odds {price} | EV {round(ev*100,2)}%")
+
+                if ev < STRONG_EV:
                     continue
 
-                is_ev, prob, ev = is_plus_ev(price)
+                key = f"{player}_{market}_{line}"
 
-                print(f"EV: {round(ev*100,2)}%")
-
-                if not is_ev or ev < STRONG_EV:
+                if key in cache:
                     continue
-
-                match_id = f"{player}_{market}_{line}"
-
-                if match_id in cache:
-                    continue
-
-                pp_link, ud_link = build_links(player)
 
                 msg = (
-                    f"🔥 +EV PROP ({sport.upper()})\n"
-                    f"Player: {player}\n"
-                    f"Prop: {market.replace('player_', '').title()} | Line: {line}\n"
+                    f"🔥 +EV PROP\n"
+                    f"{away} @ {home}\n"
+                    f"{player}\n"
+                    f"{market} | Line: {line}\n"
                     f"Odds: {price}\n"
-                    f"Win Prob: {round(prob * 100, 1)}%\n"
-                    f"EV: {round(ev * 100, 1)}%\n\n"
-                    f"PrizePicks: {pp_link}\n"
-                    f"Underdog: {ud_link}"
+                    f"EV: {round(ev*100,1)}%"
                 )
 
                 send_alert(msg)
-                cache[match_id] = time.time()
+                cache[key] = time.time()
                 found_flag[0] = True
 
-def run_engine():
+def run():
     cache = load_cache()
     found_flag = [False]
 
     for sport, markets in SPORT_PROPS.items():
-        for market in markets:
+        events = fetch_events(sport)
 
-            print(f"Scanning {sport} - {market}")
-
-            games = fetch_odds(sport, market)
-
-            if not games:
-                print("No games returned from API")
-
-            for game in games:
-                process_game(game, sport, market, cache, found_flag)
+        for event in events:
+            for market in markets:
+                process_event(event, sport, market, cache, found_flag)
 
     save_cache(cache)
 
-    # ✅ FALLBACK MESSAGE
     if not found_flag[0]:
-        send_alert("⚠️ Bot ran but found no qualifying plays.")
+        send_alert("⚠️ No props found this run.")
 
-# ------------------ MAIN ------------------ #
-
-def main():
-    print("Bot started")
-    print("API KEY LOADED:", bool(API_KEY))
-    print("WEBHOOK LOADED:", bool(WEBHOOK))
-
-    try:
-        run_engine()
-        print("Run complete.")
-
-    except Exception as e:
-        print(f"Critical error: {e}")
+# ---------------- MAIN ---------------- #
 
 if __name__ == "__main__":
-    main()
+    print("Bot starting...")
+    print("Webhook:", bool(WEBHOOK))
+
+    run()

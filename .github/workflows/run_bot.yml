@@ -1,28 +1,31 @@
-name: DFS EV Bot
+name: EV Betting Bot
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
-  workflow_dispatch:
+    - cron: "*/15 * * * *"  # runs every 15 minutes
+  workflow_dispatch:        # allows manual run
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
 
+    env:
+      ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install requests
+        run: |
+          pip install requests
 
       - name: Run bot
-        env:
-          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: python main.py
+        run: |
+          python main.py

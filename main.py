@@ -5,27 +5,28 @@ import time
 
 # --- CONFIGURATION ---
 API_KEY = os.getenv("ODDS_API_KEY")
-WEBHOOK = os.getenv("DISCORD_WEBHOOK")
+DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
 def send_alert(message):
-    if not WEBHOOK: return
-    requests.post(WEBHOOK, json={"content": message}, timeout=10)
+    if not DISCORD_WEBHOOK:
+        return
+    try:
+        requests.post(DISCORD_WEBHOOK, json={"content": message}, timeout=10)
+    except:
+        pass
 
 def run_val_bot():
-    # These are the exact keys from your list!
-    sports_to_scan = [
-        'basketball_nba', 
-        'baseball_mlb', 
-        'icehockey_nhl',
-        'soccer_epl',
-        'soccer_usa_mls',
-        'americanfootball_nfl'
-    ]
+    if not API_KEY:
+        print("❌ CRITICAL ERROR: API_KEY is empty in GitHub Secrets!")
+        return
+
+    # Using the official sport keys from your list
+    sports = ['basketball_nba', 'baseball_mlb', 'soccer_epl', 'icehockey_nhl']
     
-    for sport in sports_to_scan:
+    for sport in sports:
         print(f"Scanning {sport}...")
         
-        # DEFINITIVE URL FIX: Manually built to prevent mashing
+        # DEFINITIVE URL FIX: Prevents mashing errors
         url = f"https://api.the-odds-api.com{sport}/odds/"
         params = {
             'apiKey': API_KEY,
@@ -36,23 +37,23 @@ def run_val_bot():
         
         try:
             res = requests.get(url, params=params, timeout=15)
-            if res.status_code == 200:
-                data = res.json()
-                print(f"✅ SUCCESS: Found {len(data)} games for {sport}")
-                for game in data:
-                    msg = f"🏆 **{sport.upper()} MATCH**\n{game['away_team']} @ {game['home_team']}"
-                    send_alert(msg)
+            data = res.json()
+            
+            if isinstance(data, list):
+                if len(data) > 0:
+                    print(f"✅ SUCCESS: Found {len(data)} games for {sport}")
+                    for game in data:
+                        msg = f"🏆 **{sport.upper()} MATCH**\n{game.get('away_team')} @ {game.get('home_team')}"
+                        send_alert(msg)
+                else:
+                    print(f"ℹ️ No active games for {sport} right now.")
             else:
-                print(f"❌ API Error {res.status_code} for {sport}")
+                # FIXED INDENTATION HERE
+                print(f"❌ API Rejected Key. Message: {data.get('message', 'Unknown Error')}")
         except Exception as e:
             print(f"❌ Connection Error for {sport}: {e}")
 
 if __name__ == "__main__":
+    print("--- 24/7 UNIVERSAL BOT ONLINE ---")
     send_alert("🚀 **Universal Bot Online** - Scanning NBA, MLB, NHL, and Soccer...")
     run_val_bot()
-                print(f"❌ API Rejected Key. Message: {data.get('message')}")
-        except Exception as e:
-            print(f"❌ Connection Error: {e}")
-
-if __name__ == "__main__":
-    run_dfs_engine()

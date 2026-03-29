@@ -14,10 +14,10 @@ SPORT_PROPS = {
     'baseball_mlb': ['player_hits', 'player_home_runs']
 }
 
-# SETTINGS
-MIN_EV = 0.03        # Lower = more plays
-STRONG_EV = 0.07     # Only send stronger plays
-MIN_ODDS = -200      # Avoid heavy favorites
+# ✅ RELAXED SETTINGS (so you actually get plays)
+MIN_EV = 0.01
+STRONG_EV = 0.02
+MIN_ODDS = -300
 
 # ------------------ UTIL ------------------ #
 
@@ -97,7 +97,7 @@ def fetch_odds(sport, market):
         print(f"Fetch error: {e}")
         return []
 
-def process_game(game, sport, market, cache):
+def process_game(game, sport, market, cache, found_flag):
     for book in game.get("bookmakers", []):
         for m in book.get("markets", []):
             for outcome in m.get("outcomes", []):
@@ -109,13 +109,16 @@ def process_game(game, sport, market, cache):
                 if not player or price is None:
                     continue
 
-                # ✅ FILTER BAD ODDS
+                # ✅ DEBUG LOG
+                print(f"Checking: {player} | Odds: {price}")
+
                 if price < MIN_ODDS:
                     continue
 
                 is_ev, prob, ev = is_plus_ev(price)
 
-                # ✅ REQUIRE STRONGER PLAYS
+                print(f"EV: {round(ev*100,2)}%")
+
                 if not is_ev or ev < STRONG_EV:
                     continue
 
@@ -127,7 +130,7 @@ def process_game(game, sport, market, cache):
                 pp_link, ud_link = build_links(player)
 
                 msg = (
-                    f"🔥 STRONG +EV PROP ({sport.upper()})\n"
+                    f"🔥 +EV PROP ({sport.upper()})\n"
                     f"Player: {player}\n"
                     f"Prop: {market.replace('player_', '').title()} | Line: {line}\n"
                     f"Odds: {price}\n"
@@ -139,9 +142,11 @@ def process_game(game, sport, market, cache):
 
                 send_alert(msg)
                 cache[match_id] = time.time()
+                found_flag[0] = True
 
 def run_engine():
     cache = load_cache()
+    found_flag = [False]
 
     for sport, markets in SPORT_PROPS.items():
         for market in markets:
@@ -150,10 +155,17 @@ def run_engine():
 
             games = fetch_odds(sport, market)
 
+            if not games:
+                print("No games returned from API")
+
             for game in games:
-                process_game(game, sport, market, cache)
+                process_game(game, sport, market, cache, found_flag)
 
     save_cache(cache)
+
+    # ✅ FALLBACK MESSAGE
+    if not found_flag[0]:
+        send_alert("⚠️ Bot ran but found no qualifying plays.")
 
 # ------------------ MAIN ------------------ #
 

@@ -44,6 +44,31 @@ def build_links(player):
         f"https://underdogfantasy.com/search?q={q}"
     )
 
+# ------------------ EV LOGIC ------------------ #
+
+def american_to_prob(odds):
+    if odds is None:
+        return None
+    if odds < 0:
+        return abs(odds) / (abs(odds) + 100)
+    else:
+        return 100 / (odds + 100)
+
+def calculate_ev(prob, payout=1.0):
+    return (prob * payout) - (1 - prob)
+
+def is_plus_ev(price):
+    prob = american_to_prob(price)
+
+    if prob is None:
+        return False, 0, 0
+
+    dfs_prob = 0.50  # DFS lines assume ~50%
+
+    ev = calculate_ev(prob)
+
+    return ev > 0.05, prob, ev  # only alert if EV > 5%
+
 # ------------------ CORE ENGINE ------------------ #
 
 def fetch_odds(sport, market):
@@ -70,10 +95,6 @@ def fetch_odds(sport, market):
         print(f"Fetch error: {e}")
         return []
 
-def is_strong_line(price):
-    # Simple filter (can upgrade later)
-    return price is not None and price <= -300
-
 def process_game(game, sport, market, cache):
     for book in game.get("bookmakers", []):
         for m in book.get("markets", []):
@@ -83,7 +104,12 @@ def process_game(game, sport, market, cache):
                 price = outcome.get("price")
                 line = outcome.get("point", "N/A")
 
-                if not player or not is_strong_line(price):
+                if not player or price is None:
+                    continue
+
+                is_ev, prob, ev = is_plus_ev(price)
+
+                if not is_ev:
                     continue
 
                 match_id = f"{player}_{market}_{line}"
@@ -94,10 +120,12 @@ def process_game(game, sport, market, cache):
                 pp_link, ud_link = build_links(player)
 
                 msg = (
-                    f"🎯 DFS PROP ALERT ({sport.upper()})\n"
+                    f"🔥 +EV DFS PROP ({sport.upper()})\n"
                     f"Player: {player}\n"
                     f"Prop: {market.replace('player_', '').title()} | Line: {line}\n"
-                    f"Odds: {price}\n\n"
+                    f"Odds: {price}\n"
+                    f"Win Prob: {round(prob * 100, 1)}%\n"
+                    f"EV: {round(ev * 100, 1)}%\n\n"
                     f"PrizePicks: {pp_link}\n"
                     f"Underdog: {ud_link}"
                 )
@@ -120,10 +148,14 @@ def run_engine():
 
     save_cache(cache)
 
-# ------------------ MAIN LOOP ------------------ #
+# ------------------ MAIN ------------------ #
 
 def main():
-    send_alert("DFS BOT LIVE - scanning props")
+    print("Bot started")
+    print("API KEY LOADED:", bool(API_KEY))
+    print("WEBHOOK LOADED:", bool(WEBHOOK))
+
+    send_alert("DFS BOT LIVE - +EV MODE ENABLED")
 
     while True:
         try:
@@ -137,3 +169,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

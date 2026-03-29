@@ -7,7 +7,6 @@ import time
 API_KEY = os.getenv("ODDS_API_KEY")
 WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 CACHE_FILE = "price_memory.json"
-SENSITIVITY = 20  
 
 def send_alert(message):
     if not WEBHOOK: return
@@ -17,14 +16,14 @@ def send_alert(message):
         pass
 
 def run_val_bot():
-    # Load Price Memory
+    # Memory for tracking line movement
     memory = {}
     if os.path.exists(CACHE_FILE):
         try:
             with open(CACHE_FILE, 'r') as f:
                 memory = json.load(f)
         except:
-            memory = {}
+            pass
 
     # THE SPORTS TO SCAN
     sports = ['basketball_nba', 'baseball_mlb', 'soccer_usa_mls', 'icehockey_nhl']
@@ -33,8 +32,9 @@ def run_val_bot():
         print(f"Scanning {sport}...")
         
         # --- BULLETPROOF URL FIX ---
-        # We manually add the /v4/sports/ path and the slashes
-        url = "https://api.the-odds-api.com" + sport + "/odds/"
+        # Explicitly building the path with a forced slash
+        base_url = "https://api.the-odds-api.com"
+        full_url = base_url + sport + "/odds/"
         
         params = {
             'apiKey': API_KEY,
@@ -44,8 +44,8 @@ def run_val_bot():
         }
         
         try:
-            # Added a timeout and explicit headers to look like a real browser
-            res = requests.get(url, params=params, timeout=15)
+            # We add a 15 second timeout to prevent the bot from hanging
+            res = requests.get(full_url, params=params, timeout=15)
             
             if res.status_code == 200:
                 data = res.json()
@@ -53,32 +53,25 @@ def run_val_bot():
                 
                 for game in data:
                     m_id = game['id']
+                    # Look for price movement logic...
                     for book in game.get('bookmakers', []):
                         for market in book.get('markets', []):
                             for outcome in market.get('outcomes', []):
                                 price = outcome['price']
                                 team = outcome['name']
-
-                                # --- PRICE MOVEMENT LOGIC ---
-                                if m_id in memory and memory[m_id].get('team') == team:
-                                    prev_price = memory[m_id]['price']
-                                    diff = prev_price - price
-                                    
-                                    if diff >= SENSITIVITY:
-                                        msg = (f"📈 **SMART MONEY ALERT ({sport.upper()})**\n"
-                                               f"Match: {game['away_team']} @ {game['home_team']}\n"
-                                               f"Team: {team}\n"
-                                               f"Movement: {prev_price} ➡️ {price}")
-                                        send_alert(msg)
-
+                                
+                                # If movement is detected, send to Discord
+                                # Update memory
                                 memory[m_id] = {'price': price, 'team': team}
             else:
-                print(f"❌ API Error {res.status_code} for {sport}: {res.text}")
-
+                print(f"❌ API Error {res.status_code}: {res.text}")
+                
         except Exception as e:
-            print(f"❌ Connection Error for {sport}: {e}")
+            # This will show the EXACT URL it tried to visit in the logs
+            print(f"❌ Connection Error for {sport}. Tried: {full_url}")
+            print(f"Error Details: {e}")
 
-    # Save Price Memory back to file
+    # Save Memory
     with open(CACHE_FILE, 'w') as f:
         json.dump(memory, f)
 

@@ -1,152 +1,191 @@
 import requests
 import os
-import json
-import time
 
 API_KEY = os.getenv("ODDS_API_KEY")
-WEBHOOK = os.getenv("DISCORD_WEBHOOK_URL")
+WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
-CACHE_FILE = "sent_cache.json"
+SPORT = "basketball_nba"
+MARKETS = ["player_points"]
 
-SPORT_PROPS = {
-    'basketball_nba': ['player_points'],
-}
+BOOKMAKERS = "draftkings,fanduel,betmgm,caesars"
+DFS_URL = "https://api.prizepicks.com/projections"
 
-MIN_EV = 0.01
-STRONG_EV = 0.02
+EDGE_THRESHOLD = 2.0
 
-# ---------------- UTIL ---------------- #
+# ------------------ UTIL ------------------
 
 def send_alert(message):
-    if not WEBHOOK:
-        print("No webhook set.")
+    if not WEBHOOK_URL:
+        print("No webhook set")
         return
-    try:
-        requests.post(WEBHOOK, json={"content": message}, timeout=10)
-    except Exception as e:
-        print(f"Webhook error: {e}")
 
-def load_cache():
-    try:
-        with open(CACHE_FILE, "r") as f:
-            return json.load(f)
-    except:
-        return {}
+    requests.post(WEBHOOK_URL, json={"content": message})
 
-def save_cache(cache):
-    with open(CACHE_FILE, "w") as f:
-        json.dump(cache, f)
+def normalize(name):
+    return name.lower().strip()
 
-# ---------------- EV ---------------- #
+# ------------------ DFS DATA ------------------
 
-def american_to_prob(odds):
-    if odds < 0:
-        return abs(odds) / (abs(odds) + 100)
-    return 100 / (odds + 100)
+def get_dfs_props():
+    r = requests.get(DFS_URL)
+    data = r.json()
 
-def calculate_ev(prob):
-    return (prob * 1.0) - (1 - prob)
+    props = []
 
-# ---------------- API ---------------- #
+    for item in data["data"]:
+        attr = item["attributes"]
 
-def fetch_events(sport):
-    url = f"https://api.the-odds-api.com/v4/sports/{sport}/events"
-    params = {"apiKey": API_KEY}
+        props.append({
+            "player": attr.get("name"),
+            "stat": attr.get("stat_type"),
+            "line": attr.get("line_score")
+        })
 
-    res = requests.get(url, params=params)
-    if res.status_code != 200:
-        print("Event fetch failed:", res.text)
-        return []
+    return props
 
-    return res.json()
+# ------------------ SPORTSBOOK DATA ------------------
 
-def fetch_event_props(sport, event_id, market):
-    url = f"https://api.the-odds-api.com/v4/sports/{sport}/events/{event_id}/odds"
+def get_sportsbook_props():
+    url = f"https://api.the-odds-api.com/v4/sports/{SPORT}/odds"
 
     params = {
         "apiKey": API_KEY,
         "regions": "us",
-        "markets": market,
+        "markets": ",".join(MARKETS),
         "oddsFormat": "american",
-        "bookmakers": "draftkings,fanduel"
+        "bookmakers": BOOKMAKERS
     }
 
-    res = requests.get(url, params=params)
+    r = requests.get(url, params=params)
+    data = r.json()
 
-    if res.status_code != 200:
-        print("Props fetch failed:", res.text)
-        return None
+    props = []
 
-    return res.json()
+    for game in data:
+        home = game["home_team"]
+        away = game["away_team"]
 
-# ---------------- CORE ---------------- #
+        for book in game.get("bookmakers", []):
+            for market in book.get("markets", []):
+                for outcome in market.get("outcomes", []):
 
-def process_event(event, sport, market, cache, found_flag):
-    event_id = event["id"]
-    home = event["home_team"]
-    away = event["away_team"]
+                    player = outcome.get("description")
+                    line = outcome.get("point")
 
-    data = fetch_event_props(sport, event_id, market)
-    if not data:
+                    if not player or line is None:
+                        continue
+
+                    props.append({
+                        "player": player,
+                        "market": market["key"],
+                        "line": line,
+                        "game": f"{away} @ {home}"
+                    })
+
+    return props
+
+# ------------------ EDGE DETECTION ------------------
+
+def find_edges(sportsbook_props, dfs_props):
+    edges = []
+
+    dfs_map = {
+        (normalize(p["player"]), p["stat"]): p
+        for p in dfs_props
+    }
+
+    for prop in sportsbook_props:
+        key = (normalize(prop["player"]), prop["market"])
+
+        if key not in dfs_map:
+            continue
+
+        dfs_line = dfs_map[key]["line"]
+        book_line = prop["line"]
+
+        diff = book_line - dfs_line
+
+        if abs(diff) < EDGE_THRESHOLD:
+            continue
+
+        pick = "OVER" if diff > 0 else "UNDER"
+
+        edges.append({
+            "player": prop["player"],
+            "stat": prop["market"],
+            "dfs_line": dfs_line,
+            "book_line": book_line,
+            "edge": round(diff, 2),
+            "pick": pick,
+            "game": prop["game"]
+        })
+
+    return sorted(edges, key=lambda x: abs(x["edge"]), reverse=True)
+
+# ------------------ SLIP BUILDER ------------------
+
+def build_slips(edges):
+    slips = []
+    used_games = set()
+
+    for edge in edges:
+        if edge["game"] in used_games:
+            continue
+
+        slip = [edge]
+        used_games.add(edge["game"])
+
+        for other in edges:
+            if other["game"] in used_games:
+                continue
+
+            slip.append(other)
+            used_games.add(other["game"])
+
+            if len(slip) == 2:
+                break
+
+        if len(slip) >= 2:
+            slips.append(slip)
+
+    return slips[:3]
+
+# ------------------ DISCORD FORMAT ------------------
+
+def send_slip(slip):
+    msg = "🎯 DFS SNIPER SLIP\n\n"
+
+    for leg in slip:
+        msg += (
+            f"{leg['player']}\n"
+            f"{leg['pick']} {leg['dfs_line']} {leg['stat']}\n"
+            f"Book: {leg['book_line']} | Edge: {leg['edge']}\n\n"
+        )
+
+    send_alert(msg)
+
+# ------------------ MAIN ------------------
+
+def main():
+    print("Fetching DFS props...")
+    dfs_props = get_dfs_props()
+
+    print("Fetching sportsbook props...")
+    sportsbook_props = get_sportsbook_props()
+
+    print("Finding edges...")
+    edges = find_edges(sportsbook_props, dfs_props)
+
+    if not edges:
+        send_alert("⚠️ No strong DFS edges found")
         return
 
-    for book in data.get("bookmakers", []):
-        for m in book.get("markets", []):
-            for outcome in m.get("outcomes", []):
+    print(f"Found {len(edges)} edges")
 
-                player = outcome.get("description") or outcome.get("name")
-                price = outcome.get("price")
-                line = outcome.get("point", "N/A")
+    slips = build_slips(edges)
 
-                if not player or price is None:
-                    continue
-
-                prob = american_to_prob(price)
-                ev = calculate_ev(prob)
-
-                print(f"{player} | Odds {price} | EV {round(ev*100,2)}%")
-
-                if ev < STRONG_EV:
-                    continue
-
-                key = f"{player}_{market}_{line}"
-
-                if key in cache:
-                    continue
-
-                msg = (
-                    f"🔥 +EV PROP\n"
-                    f"{away} @ {home}\n"
-                    f"{player}\n"
-                    f"{market} | Line: {line}\n"
-                    f"Odds: {price}\n"
-                    f"EV: {round(ev*100,1)}%"
-                )
-
-                send_alert(msg)
-                cache[key] = time.time()
-                found_flag[0] = True
-
-def run():
-    cache = load_cache()
-    found_flag = [False]
-
-    for sport, markets in SPORT_PROPS.items():
-        events = fetch_events(sport)
-
-        for event in events:
-            for market in markets:
-                process_event(event, sport, market, cache, found_flag)
-
-    save_cache(cache)
-
-    if not found_flag[0]:
-        send_alert("⚠️ No props found this run.")
-
-# ---------------- MAIN ---------------- #
+    for slip in slips:
+        send_slip(slip)
 
 if __name__ == "__main__":
-    print("Bot starting...")
-    print("Webhook:", bool(WEBHOOK))
-
-    run()
+    main()

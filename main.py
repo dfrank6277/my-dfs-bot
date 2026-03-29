@@ -3,20 +3,13 @@ import os
 import json
 import time
 
-# --- 1. CONFIGURATION ---
-ODDS_API_KEY = os.getenv("ODDS_API_KEY")
+# --- CONFIGURATION ---
+API_KEY = os.getenv("ODDS_API_KEY")
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 CACHE_FILE = "sent_matches.json"
 
-# All major NBA props offered by DFS apps
-NBA_PROPS = [
-    'player_points', 
-    'player_rebounds', 
-    'player_assists', 
-    'player_threepointers', 
-    'player_blocks', 
-    'player_steals'
-]
+# All major NBA props
+NBA_PROPS = ['player_points', 'player_rebounds', 'player_assists', 'player_threepointers']
 
 def send_alert(message):
     if not DISCORD_WEBHOOK: return
@@ -32,59 +25,53 @@ def run_dfs_engine():
     except:
         cache = {}
 
-    # --- NBA PROP SCANNER ---
-    print("Scanning NBA Player Props...")
+    print("--- SCANNING NBA PROPS ---")
     for prop in NBA_PROPS:
-        # Fixed URL path to prevent mashing
+        # ABSOLUTE URL FIX: No room for mashing errors
         url = f"https://api.the-odds-api.com"
         params = {
-            'apiKey': ODDS_API_KEY,
+            'apiKey': API_KEY,
             'regions': 'us',
             'markets': prop,
             'oddsFormat': 'american'
         }
         
         try:
+            print(f"DEBUG: Checking {prop}...")
             res = requests.get(url, params=params, timeout=15)
+            
             if res.status_code == 200:
                 data = res.json()
+                print(f"✅ Found data for {prop}")
                 for game in data:
                     for book in game.get('bookmakers', []):
                         for market in book.get('markets', []):
                             for outcome in market.get('outcomes', []):
-                                player = outcome['description']
+                                player = outcome.get('description')
                                 line = outcome.get('point')
-                                price = outcome['price']
+                                price = outcome.get('price')
                                 
-                                # Logic: Alert if a player is a heavy favorite (-140+) to hit their line
-                                if price <= -140:
+                                # DFS EDGE LOGIC: Alert if price is -140 or better
+                                if price and price <= -140:
                                     m_id = f"{player}_{prop}_{line}"
                                     if m_id not in cache:
                                         msg = (f"🏀 **NBA PROP EDGE**\n"
                                                f"Player: **{player}**\n"
                                                f"Prop: {prop.replace('player_', '').capitalize()}\n"
                                                f"Line: {line}\n"
-                                               f"Odds: {price} (High Confidence ✅)")
+                                               f"Odds: {price} (Vegas Favorite ✅)")
                                         send_alert(msg)
                                         cache[m_id] = time.time()
-        except:
-            continue
+            else:
+                print(f"❌ API Error {res.status_code} for {prop}")
+        except Exception as e:
+            print(f"❌ Connection Error for {prop}: {e}")
 
-    # --- ESPORTS SCANNER (CS2/LoL) ---
-    esports = {'cs2': 'csgo_esl', 'lol': 'leagueoflegends_lck'}
-    for title, slug in esports.items():
-        url = f"https://api.the-odds-api.com{slug}/odds/"
-        try:
-            res = requests.get(url, params={'apiKey': ODDS_API_KEY, 'regions': 'us', 'markets': 'h2h'}, timeout=15)
-            if res.status_code == 200:
-                for match in res.json():
-                    # Logic: Standard game winner alerts
-                    pass
-        except: pass
-
+    # Save Cache
     with open(CACHE_FILE, 'w') as f:
         json.dump(cache, f)
 
 if __name__ == "__main__":
     print("--- 24/7 NBA & ESPORTS ENGINE ONLINE ---")
-    run_dfs_engine()
+    send_alert("🤖 **NBA Prop Scanner is Active** - Scanning Points, Rebounds, Assists, and Threes.")
+    run_val_bot()

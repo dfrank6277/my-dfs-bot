@@ -6,7 +6,7 @@ from discord.ext import commands
 # ------------------ CONFIG ------------------
 
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-DFS_URL = "https://api.prizepicks.com/projections"
+ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -26,49 +26,93 @@ TEAM_DEF_POS = {
     "SF": 1.02, "PF": 0.98, "C": 0.97
 }
 
-# ------------------ FETCH PROPS ------------------
+# ------------------ FETCH REAL PROPS ------------------
 
-def get_dfs_props():
-    r = requests.get(DFS_URL)
+def get_props():
+    url = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds"
+
+    params = {
+        "apiKey": ODDS_API_KEY,
+        "regions": "us",
+        "markets": "player_points,player_rebounds,player_assists",
+        "oddsFormat": "decimal"
+    }
+
+    r = requests.get(url, params=params)
+
+    if r.status_code != 200:
+        print("Odds API error:", r.status_code)
+        return []
+
     data = r.json()
-
     props = []
 
-    for item in data["data"]:
-        attr = item["attributes"]
+    for game in data:
+        for book in game.get("bookmakers", []):
+            for market in book.get("markets", []):
+                stat = market.get("key")
 
-        props.append({
-            "player": attr.get("name"),
-            "team": attr.get("team"),
-            "stat": attr.get("stat_type", "").lower(),
-            "line": float(attr.get("line_score", 0)),
-            "position": attr.get("position", "SF")
-        })
+                for outcome in market.get("outcomes", []):
+                    player = outcome.get("description")
+                    line = outcome.get("point")
+
+                    if not player or line is None:
+                        continue
+
+                    props.append({
+                        "player": player,
+                        "team": "UNK",
+                        "stat": stat,
+                        "line": float(line),
+                        "position": "SF"
+                    })
 
     return props
 
-# ------------------ STAT NORMALIZATION ------------------
+# ------------------ NORMALIZE STAT ------------------
 
 def normalize_stat(stat):
-    if "point" in stat:
+    if "points" in stat:
         return "points"
-    elif "rebound" in stat:
+    elif "rebounds" in stat:
         return "rebounds"
-    elif "assist" in stat:
+    elif "assists" in stat:
         return "assists"
-    elif "pra" in stat:
-        return "pra"
-    elif "3" in stat:
-        return "threes"
     else:
         return "other"
 
-# ------------------ PLAYER PERFORMANCE (PLACEHOLDER BUT STABLE) ------------------
+# ------------------ REAL PLAYER DATA ------------------
 
 def get_player_recent_avg(player):
-    base = (hash(player) % 10) + 15
-    trend = ((hash(player) % 5) - 2)
-    return base + trend
+    try:
+        search = requests.get(
+            "https://www.balldontlie.io/api/v1/players",
+            params={"search": player}
+        ).json()
+
+        if not search["data"]:
+            return 20
+
+        player_id = search["data"][0]["id"]
+
+        stats = requests.get(
+            "https://www.balldontlie.io/api/v1/stats",
+            params={
+                "player_ids[]": player_id,
+                "per_page": 5
+            }
+        ).json()
+
+        games = stats.get("data", [])
+
+        if not games:
+            return 20
+
+        pts = [g["pts"] for g in games]
+        return sum(pts) / len(pts)
+
+    except:
+        return 20
 
 # ------------------ PROJECTION MODEL ------------------
 
@@ -86,10 +130,6 @@ def project(prop):
         proj = recent * 0.7 + line * 0.3
     elif stat_type == "assists":
         proj = recent * 0.65 + line * 0.35
-    elif stat_type == "pra":
-        proj = recent * 0.75 + line * 0.25
-    elif stat_type == "threes":
-        proj = recent * 0.6 + line * 0.4
     else:
         proj = line
 
@@ -134,7 +174,7 @@ def grade(edge, confidence):
 # ------------------ ANALYSIS ------------------
 
 def analyze():
-    props = get_dfs_props()
+    props = get_props()
     results = []
 
     for p in props:
@@ -147,7 +187,6 @@ def analyze():
 
         results.append({
             "player": p["player"],
-            "team": p["team"],
             "stat": p["stat"],
             "line": p["line"],
             "projection": proj,
@@ -158,7 +197,7 @@ def analyze():
             "pick": pick,
             "grade": g,
             "confidence": conf,
-            "score": abs(edge) * conf
+            "score": (abs(edge) ** 1.2) * conf
         })
 
     return sorted(results, key=lambda x: x["score"], reverse=True)
@@ -187,7 +226,7 @@ async def top(ctx):
         await ctx.send("Run !refresh first")
         return
 
-    msg = "📊 TOP DFS PLAYS\n\n"
+    msg = "📊 TOP PLAYS\n\n"
 
     for r in cached_results[:15]:
         msg += (
@@ -206,7 +245,7 @@ async def mine(ctx):
 
     mine = build_mine(cached_results)
 
-    msg = "💣 BEST MINE\n\n"
+    msg = "💣 BEST 2-PICK\n\n"
 
     for m in mine:
         msg += (
@@ -230,9 +269,7 @@ async def why(ctx, *, player_name):
                 f"Recent Avg: {r['recent']}\n\n"
                 f"Pick: {r['pick']} ({r['grade']})\n"
                 f"Edge: {r['edge']} | Confidence: {r['confidence']}\n\n"
-                f"Factors:\n"
-                f"- Pace Multiplier: {r['pace']}\n"
-                f"- Defense vs Position: {r['dvp']}\n"
+                f"Pace: {r['pace']} | DvP: {r['dvp']}"
             )
 
             await ctx.send(msg)

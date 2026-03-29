@@ -14,6 +14,11 @@ SPORT_PROPS = {
     'baseball_mlb': ['player_hits', 'player_home_runs']
 }
 
+# SETTINGS
+MIN_EV = 0.03        # Lower = more plays
+STRONG_EV = 0.07     # Only send stronger plays
+MIN_ODDS = -200      # Avoid heavy favorites
+
 # ------------------ UTIL ------------------ #
 
 def send_alert(message):
@@ -64,7 +69,7 @@ def is_plus_ev(price):
 
     ev = calculate_ev(prob)
 
-    return ev > 0.05, prob, ev  # change to 0.08 for stricter filtering
+    return ev > MIN_EV, prob, ev
 
 # ------------------ CORE ENGINE ------------------ #
 
@@ -104,9 +109,14 @@ def process_game(game, sport, market, cache):
                 if not player or price is None:
                     continue
 
+                # ✅ FILTER BAD ODDS
+                if price < MIN_ODDS:
+                    continue
+
                 is_ev, prob, ev = is_plus_ev(price)
 
-                if not is_ev:
+                # ✅ REQUIRE STRONGER PLAYS
+                if not is_ev or ev < STRONG_EV:
                     continue
 
                 match_id = f"{player}_{market}_{line}"
@@ -117,7 +127,7 @@ def process_game(game, sport, market, cache):
                 pp_link, ud_link = build_links(player)
 
                 msg = (
-                    f"🔥 +EV DFS PROP ({sport.upper()})\n"
+                    f"🔥 STRONG +EV PROP ({sport.upper()})\n"
                     f"Player: {player}\n"
                     f"Prop: {market.replace('player_', '').title()} | Line: {line}\n"
                     f"Odds: {price}\n"
@@ -151,8 +161,6 @@ def main():
     print("Bot started")
     print("API KEY LOADED:", bool(API_KEY))
     print("WEBHOOK LOADED:", bool(WEBHOOK))
-
-    send_alert("DFS BOT RUNNING (+EV scan)")
 
     try:
         run_engine()

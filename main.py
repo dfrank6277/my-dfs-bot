@@ -1,19 +1,46 @@
 import requests
 import os
+import json
 import discord
-from discord.ext import commands
+import asyncio
+from discord.ext import commands, tasks
 
 # ------------------ CONFIG ------------------
 
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 
+REFRESH_MINUTES = 5
+MEMORY_FILE = "memory.json"
+LINES_FILE = "lines.json"
+
 intents = discord.Intents.default()
+intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 cached_results = []
 
-# ------------------ TEAM DATA ------------------
+# ------------------ STORAGE ------------------
+
+def load_json(file):
+    if not os.path.exists(file):
+        return {}
+    with open(file, "r") as f:
+        return json.load(f)
+
+def save_json(file, data):
+    with open(file, "w") as f:
+        json.dump(data, f, indent=2)
+
+memory = load_json(MEMORY_FILE)
+line_history = load_json(LINES_FILE)
+
+# ------------------ PERSONALITY ------------------
+
+def jarvis(text):
+    return f"{text}\n\n— Jarvis"
+
+# ------------------ DATA ------------------
 
 TEAM_PACE = {
     "WAS": 103, "ATL": 102, "IND": 101,
@@ -26,7 +53,7 @@ TEAM_DEF_POS = {
     "SF": 1.02, "PF": 0.98, "C": 0.97
 }
 
-# ------------------ FETCH REAL PROPS ------------------
+# ------------------ FETCH PROPS ------------------
 
 def get_props():
     url = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds"
@@ -41,11 +68,11 @@ def get_props():
     r = requests.get(url, params=params)
 
     if r.status_code != 200:
-        print("Odds API error:", r.status_code)
+        print("API error:", r.status_code)
         return []
 
-    data = r.json()
     props = []
+    data = r.json()
 
     for game in data:
         for book in game.get("bookmakers", []):
@@ -59,119 +86,108 @@ def get_props():
                     if not player or line is None:
                         continue
 
+                    key = f"{player}_{stat}"
+
+                    # track line movement
+                    old_line = line_history.get(key)
+                    movement = None
+
+                    if old_line:
+                        movement = round(line - old_line, 2)
+
+                    line_history[key] = line
+
                     props.append({
                         "player": player,
-                        "team": "UNK",
                         "stat": stat,
                         "line": float(line),
+                        "movement": movement,
+                        "team": "UNK",
                         "position": "SF"
                     })
 
+    save_json(LINES_FILE, line_history)
     return props
 
-# ------------------ NORMALIZE STAT ------------------
+# ------------------ HELPERS ------------------
 
-def normalize_stat(stat):
-    if "points" in stat:
-        return "points"
-    elif "rebounds" in stat:
-        return "rebounds"
-    elif "assists" in stat:
-        return "assists"
-    else:
-        return "other"
+def normalize(stat):
+    if "points" in stat: return "points"
+    if "rebounds" in stat: return "rebounds"
+    if "assists" in stat: return "assists"
+    return "other"
 
-# ------------------ REAL PLAYER DATA ------------------
-
-def get_player_recent_avg(player):
+def get_recent(player, stat):
     try:
-        search = requests.get(
-            "https://www.balldontlie.io/api/v1/players",
-            params={"search": player}
-        ).json()
+        s = requests.get("https://www.balldontlie.io/api/v1/players",
+                         params={"search": player}).json()
 
-        if not search["data"]:
+        if not s["data"]:
             return 20
 
-        player_id = search["data"][0]["id"]
+        pid = s["data"][0]["id"]
 
         stats = requests.get(
             "https://www.balldontlie.io/api/v1/stats",
-            params={
-                "player_ids[]": player_id,
-                "per_page": 5
-            }
+            params={"player_ids[]": pid, "per_page": 5}
         ).json()
 
         games = stats.get("data", [])
-
         if not games:
             return 20
 
-        pts = [g["pts"] for g in games]
-        return sum(pts) / len(pts)
+        if stat == "points":
+            vals = [g["pts"] for g in games]
+        elif stat == "rebounds":
+            vals = [g["reb"] for g in games]
+        elif stat == "assists":
+            vals = [g["ast"] for g in games]
+        else:
+            return 20
+
+        return sum(vals) / len(vals)
 
     except:
         return 20
 
-# ------------------ PROJECTION MODEL ------------------
+# ------------------ MODEL ------------------
 
-def project(prop):
-    stat_type = normalize_stat(prop["stat"])
-    line = prop["line"]
+def project(p):
+    stat = normalize(p["stat"])
+    line = p["line"]
 
-    recent = get_player_recent_avg(prop["player"])
-    pace = TEAM_PACE.get(prop["team"], 100) / 100
-    dvp = TEAM_DEF_POS.get(prop["position"], 1.0)
+    recent = get_recent(p["player"], stat)
+    pace = TEAM_PACE.get(p["team"], 100) / 100
+    dvp = TEAM_DEF_POS.get(p["position"], 1.0)
 
-    if stat_type == "points":
-        proj = recent * 0.6 + line * 0.4
-    elif stat_type == "rebounds":
-        proj = recent * 0.7 + line * 0.3
-    elif stat_type == "assists":
-        proj = recent * 0.65 + line * 0.35
+    if stat == "points":
+        base = recent * 0.6 + line * 0.4
+    elif stat == "rebounds":
+        base = recent * 0.7 + line * 0.3
+    elif stat == "assists":
+        base = recent * 0.65 + line * 0.35
     else:
-        proj = line
+        base = line
 
-    projection = proj * pace * dvp
+    return round(base * pace * dvp, 2), recent, pace, dvp
 
-    return round(projection, 2), recent, pace, dvp
-
-# ------------------ CONFIDENCE ------------------
-
-def confidence_score(edge, pace, dvp):
+def confidence(edge, pace, dvp):
     score = 0
-
-    if abs(edge) > 3:
-        score += 0.4
-    elif abs(edge) > 2:
-        score += 0.3
-    elif abs(edge) > 1:
-        score += 0.2
-
-    if pace > 1:
-        score += 0.2
-
-    if dvp > 1:
-        score += 0.2
-
+    if abs(edge) > 3: score += 0.4
+    elif abs(edge) > 2: score += 0.3
+    elif abs(edge) > 1: score += 0.2
+    if pace > 1: score += 0.2
+    if dvp > 1: score += 0.2
     return round(min(score, 1), 2)
 
-# ------------------ GRADING ------------------
-
-def grade(edge, confidence):
+def grade(edge, conf):
     e = abs(edge)
+    if e >= 4 and conf >= 0.7: return "A"
+    if e >= 2.5: return "B"
+    if e >= 1.5: return "C"
+    return "D"
 
-    if e >= 4 and confidence >= 0.7:
-        return "A"
-    elif e >= 2.5:
-        return "B"
-    elif e >= 1.5:
-        return "C"
-    else:
-        return "D"
-
-# ------------------ ANALYSIS ------------------
+# ------------------ ANALYZE ------------------
 
 def analyze():
     props = get_props()
@@ -180,15 +196,12 @@ def analyze():
     for p in props:
         proj, recent, pace, dvp = project(p)
         edge = round(proj - p["line"], 2)
-
         pick = "OVER" if edge > 0 else "UNDER"
-        conf = confidence_score(edge, pace, dvp)
+        conf = confidence(edge, pace, dvp)
         g = grade(edge, conf)
 
         results.append({
-            "player": p["player"],
-            "stat": p["stat"],
-            "line": p["line"],
+            **p,
             "projection": proj,
             "recent": recent,
             "pace": pace,
@@ -202,80 +215,62 @@ def analyze():
 
     return sorted(results, key=lambda x: x["score"], reverse=True)
 
-# ------------------ BUILD MINE ------------------
+# ------------------ AUTO LOOP ------------------
 
-def build_mine(results):
-    top = [r for r in results if r["grade"] in ["A", "B"]]
-    return top[:2]
+@tasks.loop(minutes=REFRESH_MINUTES)
+async def auto_refresh():
+    global cached_results
+    cached_results = analyze()
+    print("Auto-refreshed model")
 
-# ------------------ DISCORD COMMANDS ------------------
+# ------------------ COMMANDS ------------------
 
 @bot.event
 async def on_ready():
-    print(f"✅ Logged in as {bot.user}")
-
-@bot.command()
-async def refresh(ctx):
-    global cached_results
-    cached_results = analyze()
-    await ctx.send("✅ Model refreshed")
+    print(f"Jarvis online as {bot.user}")
+    auto_refresh.start()
 
 @bot.command()
 async def top(ctx):
     if not cached_results:
-        await ctx.send("Run !refresh first")
+        await ctx.send("Still building the board...")
         return
 
-    msg = "📊 TOP PLAYS\n\n"
+    msg = "Top edges right now:\n\n"
 
-    for r in cached_results[:15]:
-        msg += (
-            f"{r['grade']} | {r['player']} ({r['stat']})\n"
-            f"{r['pick']} {r['line']}\n"
-            f"Proj: {r['projection']} | Edge: {r['edge']} | Conf: {r['confidence']}\n\n"
-        )
+    for r in cached_results[:10]:
+        move = f" | Move: {r['movement']}" if r["movement"] else ""
+        msg += f"{r['grade']} {r['player']} — {r['pick']} {r['line']} (Edge {r['edge']}){move}\n"
 
-    await ctx.send(msg)
+    await ctx.send(jarvis(msg))
 
 @bot.command()
 async def mine(ctx):
-    if not cached_results:
-        await ctx.send("Run !refresh first")
-        return
+    best = [r for r in cached_results if r["grade"] in ["A", "B"]][:2]
 
-    mine = build_mine(cached_results)
+    msg = "2-leg build with strongest value:\n\n"
+    for r in best:
+        msg += f"{r['player']} — {r['pick']} {r['line']} (Edge {r['edge']})\n"
 
-    msg = "💣 BEST 2-PICK\n\n"
-
-    for m in mine:
-        msg += (
-            f"{m['grade']} | {m['player']} ({m['stat']})\n"
-            f"{m['pick']} {m['line']}\n"
-            f"Proj: {m['projection']} | Edge: {m['edge']}\n\n"
-        )
-
-    await ctx.send(msg)
+    await ctx.send(jarvis(msg))
 
 @bot.command()
-async def why(ctx, *, player_name):
+async def why(ctx, *, name):
     for r in cached_results:
-        if player_name.lower() in r["player"].lower():
-
+        if name.lower() in r["player"].lower():
             msg = (
-                f"📊 {r['player']} ANALYSIS\n\n"
-                f"Stat: {r['stat']}\n"
-                f"Line: {r['line']}\n"
-                f"Projection: {r['projection']}\n"
-                f"Recent Avg: {r['recent']}\n\n"
-                f"Pick: {r['pick']} ({r['grade']})\n"
-                f"Edge: {r['edge']} | Confidence: {r['confidence']}\n\n"
-                f"Pace: {r['pace']} | DvP: {r['dvp']}"
+                f"{r['player']} breakdown:\n\n"
+                f"Line: {r['line']} → Projection: {r['projection']}\n"
+                f"Recent: {round(r['recent'],1)}\n"
+                f"Edge: {r['edge']} ({r['grade']})\n"
+                f"Confidence: {r['confidence']}\n"
+                f"Pace: {r['pace']} | Matchup: {r['dvp']}\n"
+                f"Line movement: {r['movement']}"
             )
-
-            await ctx.send(msg)
+            await ctx.send(jarvis(msg))
             return
 
-    await ctx.send("Player not found")
+    await ctx.send("Not on the board.")
 
 # ------------------ RUN ------------------
 

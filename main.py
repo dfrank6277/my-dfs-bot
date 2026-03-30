@@ -1,3 +1,6 @@
+Here's your complete refactored Discord bot code - just copy and paste this into your `main.py`:
+
+```python
 import requests
 import os
 import json
@@ -8,9 +11,9 @@ from discord.ext import commands, tasks
 # ------------------ CONFIG ------------------
 
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-ODDS_API_KEY = os.getenv("ODDS_API_KEY")
+WINSTON_API_URL = "https://skill-showcase-367.preview.emergentagent.com"
 
-REFRESH_MINUTES = 5
+REFRESH_MINUTES = 10  # Winston updates every 5min, so 10min is safe
 MEMORY_FILE = "memory.json"
 LINES_FILE = "lines.json"
 
@@ -40,238 +43,265 @@ line_history = load_json(LINES_FILE)
 def jarvis(text):
     return f"{text}\n\n— Jarvis"
 
-# ------------------ DATA ------------------
+# ------------------ FETCH FROM WINSTON ------------------
 
-TEAM_PACE = {
-    "WAS": 103, "ATL": 102, "IND": 101,
-    "LAL": 100, "PHX": 99,
-    "NYK": 96, "CLE": 95, "MIN": 94
-}
-
-TEAM_DEF_POS = {
-    "PG": 1.05, "SG": 1.04,
-    "SF": 1.02, "PF": 0.98, "C": 0.97
-}
-
-# ------------------ FETCH PROPS ------------------
-
-def get_props():
-    url = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds"
-
-    params = {
-        "apiKey": ODDS_API_KEY,
-        "regions": "us",
-        "markets": "player_points,player_rebounds,player_assists",
-        "oddsFormat": "decimal"
-    }
-
-    r = requests.get(url, params=params)
-
-    if r.status_code != 200:
-        print("API error:", r.status_code)
+def get_winston_picks():
+    """
+    Fetch analyzed picks directly from Winston's API
+    Winston handles all the heavy lifting:
+    - Real-time odds from The Odds API
+    - Player stats and projections
+    - Edge calculations
+    - Confidence scoring
+    """
+    try:
+        response = requests.get(f"{WINSTON_API_URL}/api/props/daily-picks", timeout=10)
+        
+        if response.status_code != 200:
+            print(f"Winston API error: {response.status_code}")
+            return []
+        
+        data = response.json()
+        picks = data.get('picks', [])
+        
+        # Transform Winston's format to bot's expected format
+        results = []
+        
+        for pick in picks:
+            # Track line movement
+            player = pick.get('player_name', 'Unknown')
+            stat = pick.get('stat_type', 'unknown')
+            line = pick.get('line', 0)
+            
+            key = f"{player}_{stat}"
+            old_line = line_history.get(key)
+            movement = None
+            
+            if old_line:
+                movement = round(line - old_line, 2)
+            
+            line_history[key] = line
+            
+            # Map Winston's fields to bot's expected structure
+            results.append({
+                "player": player,
+                "stat": stat,
+                "line": line,
+                "movement": movement,
+                "team": pick.get('team_abbr', 'UNK'),
+                "position": pick.get('position', 'SF'),
+                "projection": pick.get('player_avg', line),  # Winston's projected value
+                "edge": pick.get('edge', 0),
+                "pick": pick.get('recommendation', 'OVER'),  # OVER/UNDER
+                "grade": calculate_grade(pick.get('edge', 0), pick.get('confidence', 0)),
+                "confidence": pick.get('confidence', 0) / 100,  # Convert to 0-1 scale
+                "score": pick.get('edge', 0) * (pick.get('confidence', 0) / 100),  # Edge * confidence
+                "reasoning": pick.get('reasoning', ''),
+                "bookmaker": pick.get('bookmaker', 'Multiple'),
+                "game_time": pick.get('game_time', ''),
+                "over_price": pick.get('over_price', -110),
+                "under_price": pick.get('under_price', -110)
+            })
+        
+        # Save line history for movement tracking
+        save_json(LINES_FILE, line_history)
+        
+        print(f"✅ Fetched {len(results)} picks from Winston")
+        return results
+        
+    except Exception as e:
+        print(f"Error fetching from Winston: {e}")
         return []
-
-    props = []
-    data = r.json()
-
-    for game in data:
-        for book in game.get("bookmakers", []):
-            for market in book.get("markets", []):
-                stat = market.get("key")
-
-                for outcome in market.get("outcomes", []):
-                    player = outcome.get("description")
-                    line = outcome.get("point")
-
-                    if not player or line is None:
-                        continue
-
-                    key = f"{player}_{stat}"
-
-                    # track line movement
-                    old_line = line_history.get(key)
-                    movement = None
-
-                    if old_line:
-                        movement = round(line - old_line, 2)
-
-                    line_history[key] = line
-
-                    props.append({
-                        "player": player,
-                        "stat": stat,
-                        "line": float(line),
-                        "movement": movement,
-                        "team": "UNK",
-                        "position": "SF"
-                    })
-
-    save_json(LINES_FILE, line_history)
-    return props
 
 # ------------------ HELPERS ------------------
 
-def normalize(stat):
-    if "points" in stat: return "points"
-    if "rebounds" in stat: return "rebounds"
-    if "assists" in stat: return "assists"
-    return "other"
-
-def get_recent(player, stat):
-    try:
-        s = requests.get("https://www.balldontlie.io/api/v1/players",
-                         params={"search": player}).json()
-
-        if not s["data"]:
-            return 20
-
-        pid = s["data"][0]["id"]
-
-        stats = requests.get(
-            "https://www.balldontlie.io/api/v1/stats",
-            params={"player_ids[]": pid, "per_page": 5}
-        ).json()
-
-        games = stats.get("data", [])
-        if not games:
-            return 20
-
-        if stat == "points":
-            vals = [g["pts"] for g in games]
-        elif stat == "rebounds":
-            vals = [g["reb"] for g in games]
-        elif stat == "assists":
-            vals = [g["ast"] for g in games]
-        else:
-            return 20
-
-        return sum(vals) / len(vals)
-
-    except:
-        return 20
-
-# ------------------ MODEL ------------------
-
-def project(p):
-    stat = normalize(p["stat"])
-    line = p["line"]
-
-    recent = get_recent(p["player"], stat)
-    pace = TEAM_PACE.get(p["team"], 100) / 100
-    dvp = TEAM_DEF_POS.get(p["position"], 1.0)
-
-    if stat == "points":
-        base = recent * 0.6 + line * 0.4
-    elif stat == "rebounds":
-        base = recent * 0.7 + line * 0.3
-    elif stat == "assists":
-        base = recent * 0.65 + line * 0.35
-    else:
-        base = line
-
-    return round(base * pace * dvp, 2), recent, pace, dvp
-
-def confidence(edge, pace, dvp):
-    score = 0
-    if abs(edge) > 3: score += 0.4
-    elif abs(edge) > 2: score += 0.3
-    elif abs(edge) > 1: score += 0.2
-    if pace > 1: score += 0.2
-    if dvp > 1: score += 0.2
-    return round(min(score, 1), 2)
-
-def grade(edge, conf):
+def calculate_grade(edge, confidence):
+    """
+    Calculate letter grade based on Winston's edge and confidence
+    """
     e = abs(edge)
-    if e >= 4 and conf >= 0.7: return "A"
-    if e >= 2.5: return "B"
-    if e >= 1.5: return "C"
+    conf = confidence / 100  # Convert to 0-1 scale
+    
+    if e >= 4 and conf >= 0.70: return "A"
+    if e >= 2.5 and conf >= 0.60: return "B"
+    if e >= 1.5 and conf >= 0.50: return "C"
     return "D"
 
-# ------------------ ANALYZE ------------------
-
-def analyze():
-    props = get_props()
-    results = []
-
-    for p in props:
-        proj, recent, pace, dvp = project(p)
-        edge = round(proj - p["line"], 2)
-        pick = "OVER" if edge > 0 else "UNDER"
-        conf = confidence(edge, pace, dvp)
-        g = grade(edge, conf)
-
-        results.append({
-            **p,
-            "projection": proj,
-            "recent": recent,
-            "pace": pace,
-            "dvp": dvp,
-            "edge": edge,
-            "pick": pick,
-            "grade": g,
-            "confidence": conf,
-            "score": (abs(edge) ** 1.2) * conf
-        })
-
-    return sorted(results, key=lambda x: x["score"], reverse=True)
+def normalize_stat(stat):
+    """Normalize stat names for display"""
+    stat_map = {
+        'player_points': 'PTS',
+        'player_rebounds': 'REB',
+        'player_assists': 'AST',
+        'player_threes': '3PT',
+        'batter_hits': 'HITS',
+        'pitcher_strikeouts': 'K'
+    }
+    return stat_map.get(stat, stat.replace('player_', '').upper())
 
 # ------------------ AUTO LOOP ------------------
 
 @tasks.loop(minutes=REFRESH_MINUTES)
 async def auto_refresh():
+    """Automatically refresh picks from Winston"""
     global cached_results
-    cached_results = analyze()
-    print("Auto-refreshed model")
+    cached_results = get_winston_picks()
+    
+    if cached_results:
+        print(f"🔄 Auto-refreshed: {len(cached_results)} picks loaded from Winston")
+    else:
+        print("⚠️  Auto-refresh returned no picks")
 
 # ------------------ COMMANDS ------------------
 
 @bot.event
 async def on_ready():
-    print(f"Jarvis online as {bot.user}")
+    print(f"🤖 Jarvis online as {bot.user}")
+    print(f"🧠 Connected to Winston at {WINSTON_API_URL}")
+    
+    # Initial load
+    global cached_results
+    cached_results = get_winston_picks()
+    print(f"📊 Initial load: {len(cached_results)} picks")
+    
+    # Start auto-refresh loop
     auto_refresh.start()
 
 @bot.command()
 async def top(ctx):
+    """Show top 10 highest edge picks"""
     if not cached_results:
-        await ctx.send("Still building the board...")
+        await ctx.send("🔄 Still syncing with Winston... try again in a moment.")
         return
 
-    msg = "Top edges right now:\n\n"
+    msg = "🔥 **Top Edges Right Now:**\n\n"
 
     for r in cached_results[:10]:
-        move = f" | Move: {r['movement']}" if r["movement"] else ""
-        msg += f"{r['grade']} {r['player']} — {r['pick']} {r['line']} (Edge {r['edge']}){move}\n"
+        stat_display = normalize_stat(r['stat'])
+        move = f" | 📈 Move: {r['movement']:+.1f}" if r['movement'] else ""
+        msg += f"`{r['grade']}` **{r['player']}** — {r['pick']} {r['line']} {stat_display} (Edge **{r['edge']:+.1f}**){move}\n"
 
     await ctx.send(jarvis(msg))
 
 @bot.command()
 async def mine(ctx):
+    """Show 2-leg parlay with strongest value"""
     best = [r for r in cached_results if r["grade"] in ["A", "B"]][:2]
 
-    msg = "2-leg build with strongest value:\n\n"
+    if len(best) < 2:
+        await ctx.send(jarvis("Not enough elite picks available right now. Check `!top` for current options."))
+        return
+
+    msg = "💎 **2-Leg Build with Strongest Value:**\n\n"
     for r in best:
-        msg += f"{r['player']} — {r['pick']} {r['line']} (Edge {r['edge']})\n"
+        stat_display = normalize_stat(r['stat'])
+        msg += f"**{r['player']}** — {r['pick']} {r['line']} {stat_display} (Edge **{r['edge']:+.1f}**, Grade `{r['grade']}`)\n"
 
     await ctx.send(jarvis(msg))
 
 @bot.command()
 async def why(ctx, *, name):
+    """Explain why a specific player is recommended"""
     for r in cached_results:
         if name.lower() in r["player"].lower():
+            stat_display = normalize_stat(r['stat'])
+            
             msg = (
-                f"{r['player']} breakdown:\n\n"
-                f"Line: {r['line']} → Projection: {r['projection']}\n"
-                f"Recent: {round(r['recent'],1)}\n"
-                f"Edge: {r['edge']} ({r['grade']})\n"
-                f"Confidence: {r['confidence']}\n"
-                f"Pace: {r['pace']} | Matchup: {r['dvp']}\n"
-                f"Line movement: {r['movement']}"
+                f"📊 **{r['player']} Breakdown:**\n\n"
+                f"**Line:** {r['line']} {stat_display}\n"
+                f"**Projection:** {r['projection']:.1f}\n"
+                f"**Edge:** {r['edge']:+.1f} (Grade `{r['grade']}`)\n"
+                f"**Confidence:** {r['confidence']*100:.0f}%\n"
+                f"**Pick:** {r['pick']}\n"
+                f"**Bookmaker:** {r['bookmaker']}\n"
             )
+            
+            if r['movement']:
+                msg += f"**Line Movement:** {r['movement']:+.1f}\n"
+            
+            if r.get('reasoning'):
+                msg += f"\n💡 **Winston's Analysis:**\n{r['reasoning']}"
+            
             await ctx.send(jarvis(msg))
             return
 
-    await ctx.send("Not on the board.")
+    await ctx.send(jarvis(f"❌ {name} not found on the board. Try `!top` to see current picks."))
+
+@bot.command()
+async def stats(ctx):
+    """Show overall Winston stats for today"""
+    if not cached_results:
+        await ctx.send("No picks loaded yet.")
+        return
+    
+    total = len(cached_results)
+    elite = len([r for r in cached_results if r['grade'] in ['A', 'B']])
+    avg_edge = sum(abs(r['edge']) for r in cached_results) / total if total > 0 else 0
+    avg_conf = sum(r['confidence'] for r in cached_results) / total if total > 0 else 0
+    
+    # Sports breakdown
+    sports = {}
+    for r in cached_results:
+        team = r.get('team', 'UNK')
+        # Infer sport from stat type (simplified)
+        if 'batter' in r['stat'] or 'pitcher' in r['stat']:
+            sport = 'MLB'
+        else:
+            sport = 'NBA'  # Default
+        
+        sports[sport] = sports.get(sport, 0) + 1
+    
+    msg = (
+        f"📈 **Winston's Daily Stats:**\n\n"
+        f"**Total Picks:** {total}\n"
+        f"**Elite Picks (A/B):** {elite}\n"
+        f"**Avg Edge:** {avg_edge:+.1f}\n"
+        f"**Avg Confidence:** {avg_conf*100:.0f}%\n\n"
+        f"**Sports Breakdown:**\n"
+    )
+    
+    for sport, count in sports.items():
+        msg += f"• {sport}: {count}\n"
+    
+    await ctx.send(jarvis(msg))
+
+@bot.command()
+async def refresh(ctx):
+    """Manually refresh picks from Winston"""
+    global cached_results
+    
+    await ctx.send("🔄 Refreshing from Winston...")
+    cached_results = get_winston_picks()
+    
+    if cached_results:
+        await ctx.send(jarvis(f"✅ Loaded {len(cached_results)} fresh picks from Winston!"))
+    else:
+        await ctx.send(jarvis("⚠️ No picks available. Winston might be updating, try again in a moment."))
+
+@bot.command()
+async def help_commands(ctx):
+    """Show available commands"""
+    msg = (
+        "🤖 **Jarvis Commands:**\n\n"
+        "`!top` - Top 10 highest edge picks\n"
+        "`!mine` - Get a 2-leg parlay build\n"
+        "`!why <player>` - Detailed breakdown for a player\n"
+        "`!stats` - Today's overall stats\n"
+        "`!refresh` - Manually sync with Winston\n"
+        "`!help_commands` - Show this menu\n\n"
+        "Powered by Winston 🧠"
+    )
+    await ctx.send(msg)
 
 # ------------------ RUN ------------------
 
-bot.run(TOKEN)
+if __name__ == "__main__":
+    if not TOKEN:
+        print("❌ ERROR: DISCORD_BOT_TOKEN not set in environment variables")
+        exit(1)
+    
+    print("🚀 Starting Jarvis Discord Bot...")
+    print(f"🔗 Winston API: {WINSTON_API_URL}")
+    
+    bot.run(TOKEN)
+```

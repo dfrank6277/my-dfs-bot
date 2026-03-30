@@ -10,8 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
 
     steps:
       - name: Checkout repo
@@ -24,7 +23,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests
+          pip install requests discord.py
 
       - name: Run bot
         run: |
